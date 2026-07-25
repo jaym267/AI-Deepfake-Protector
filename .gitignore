@@ -1,0 +1,69 @@
+# --- Secrets: never commit ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+service-account*.json
+*.credentials
+
+# --- Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node / frontend (step 2) ---
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-error.log*
+
+# --- User uploads: must never reach the repo ---
+# Uploaded media is deleted after analysis by design (docs/DECISIONS.md D2).
+# This is a backstop in case a debug run ever writes one to disk.
+uploads/
+tmp/
+*.tmp
+adp_*
+
+# --- Model weights & datasets ---
+# Excluded for size, and because training data licences (e.g. GenImage
+# CC BY-NC-SA) can restrict redistribution of derived weights. Use a model
+# registry or release assets instead of committing binaries here.
+models/**
+!models/.gitkeep
+!models/**/*.md
+!models/**/*.py
+!models/**/*.json
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.h5
+*.tflite
+data/
+datasets/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
