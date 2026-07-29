@@ -67,3 +67,6 @@ desktop.ini
 .idea/
 .vscode/
 *.swp
+
+# TypeScript incremental build info
+*.tsbuildinfo

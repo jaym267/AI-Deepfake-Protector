@@ -84,7 +84,7 @@ thresholds by eye is how a detector ends up confidently wrong.
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | Result disclaimer wording (`services/disclaimer.py`) | **DRAFT — needs approval before step 2 UI copy is finalised** |
+| 1 | Result disclaimer wording (`services/disclaimer.py`) | **PROVISIONAL — approved for development at step 2; still needs a real review before public deploy** |
 | 2 | GenImage CC BY-NC-SA 4.0 non-commercial clause vs. any future monetisation | **Open — see below** |
 | 3 | Rate limiting / abuse controls on a free public endpoint | Not started; needed before public deploy |
 | 4 | Duration limits (audio 2min, video 60s) | Not enforced yet — needs ffprobe, deferred to step 3-5. Byte caps are the effective limit today |
@@ -125,3 +125,60 @@ involved.
 - **C2PA provenance checks, rPPG/blood-flow, SyncNet-style lip-sync** — these
   appear in `README.md` but are not part of the four-model architecture in the
   brief. Not in scope for the current build order.
+
+---
+
+## D7 — Frontend renders bands and prose only, and owns no disclaimer copy
+
+**Decided at:** step 2.
+
+The results dashboard displays a verdict band, a confidence band, evidence
+sentences, and which checks ran. It has no code path that renders a number, and
+`frontend/src/api/types.ts` deliberately has no counterpart to `InternalScores` —
+so there is nothing to accidentally bind to if the server ever over-serialises.
+Which checks ran is disclosed; what they scored is not.
+
+`result.disclaimer` is rendered verbatim from the API rather than being stored in
+the frontend, so the wording approved once in `services/disclaimer.py` reaches the
+dashboard and the step 7 PDF together. Verdict wording itself lives in one module
+(`frontend/src/copy.ts`), for the same reason: this copy is where the product's
+honesty about uncertainty either holds or doesn't, and it should be reviewable in
+one place rather than scattered across components.
+
+**Consequence:** a design change that wants to show "87% likely fake" is a
+reversal of D3, not a UI tweak.
+
+---
+
+## D8 — No mock data layer in the frontend
+
+**Decided at:** step 2.
+
+No MSW, no fixtures. The frontend talks to the running backend or it shows an
+error state.
+
+**Why:** step 2 exists to prove the full stack works end to end before any ML
+lands. A frontend rendering against invented data would prove the CSS works and
+nothing about the contract — and the contract (202 + poll, banded fields,
+server-supplied disclaimer) is exactly what steps 3-7 build on. Verified
+manually against the live backend: upload → poll → result, unsupported type,
+oversize, backend unreachable, and `POST /report` returning 501.
+
+**Consequence:** frontend component tests, when added, will need either a test
+backend or a fixture layer introduced only for tests — not for development.
+
+---
+
+## D9 — The stub banner is load-bearing
+
+**Decided at:** step 2.
+
+While `is_mock` is true, the dashboard shows an unmissable banner stating the
+result is a placeholder and says nothing about the uploaded file.
+
+**Why:** the stub score is a hash of the file's bytes, so it is stable per file
+and looks entirely plausible — a person could upload a video of themselves and
+read "Strong signs of manipulation" off a hash. That is precisely the harm this
+project exists to reduce. The banner clears itself when `MODELS_ARE_STUBS` is set
+to False in step 6; it is not a manual cleanup step someone has to remember.
+

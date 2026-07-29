@@ -1,0 +1,473 @@
+/*
+ * Styles.
+ *
+ * Colour is used to reinforce a verdict, never to carry it: every tone also has
+ * a text headline and a severity label, so the result is legible without colour
+ * perception and to a screen reader. The alert tone is deliberately restrained
+ * rather than an emergency red — an automated estimate about a real person
+ * shouldn't be dressed up as a confirmed finding.
+ */
+
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --border: #e2e2dd;
+  --text: #1b1b19;
+  --text-muted: #6b6b64;
+  --accent: #2f5eb3;
+
+  --authentic: #2f7a4f;
+  --authentic-bg: #eaf5ee;
+  --uncertain: #6b6b64;
+  --uncertain-bg: #f0f0ec;
+  --caution: #9a6414;
+  --caution-bg: #fbf1e0;
+  --alert: #a33a2c;
+  --alert-bg: #fbeceb;
+
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16161a;
+    --surface: #1e1e23;
+    --border: #33333b;
+    --text: #ececf0;
+    --text-muted: #9b9ba6;
+    --accent: #7fa5e8;
+
+    --authentic: #7fc79b;
+    --authentic-bg: #1b2b21;
+    --uncertain: #a8a8b2;
+    --uncertain-bg: #26262c;
+    --caution: #e0b168;
+    --caution-bg: #2e2617;
+    --alert: #e79184;
+    --alert-bg: #2e1d1a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.55;
+}
+
+.app {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+/* --- Masthead --- */
+
+.masthead h1 {
+  font-size: 1.9rem;
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+.masthead__tagline {
+  margin: 0 0 2rem;
+  color: var(--text-muted);
+  max-width: 40rem;
+}
+
+/* --- Panels --- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.panel h2 {
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+}
+
+.panel h3 {
+  margin: 1.75rem 0 0.75rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+/* --- Dropzone --- */
+
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dropzone--active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.dropzone--busy {
+  opacity: 0.6;
+}
+
+.dropzone__lead {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.dropzone__or {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.dropzone__formats,
+.dropzone__limits {
+  margin: 1.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.dropzone__limits {
+  margin-top: 0.35rem;
+}
+
+/* --- Buttons --- */
+
+.button {
+  font: inherit;
+  font-weight: 500;
+  padding: 0.6rem 1.15rem;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .button--primary {
+    color: #12121a;
+  }
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.75rem;
+}
+
+/* --- Notices --- */
+
+.notice {
+  border-radius: 7px;
+  padding: 0.8rem 1rem;
+  font-size: 0.9rem;
+  margin: 1rem 0 0;
+  border: 1px solid transparent;
+}
+
+.notice--error {
+  background: var(--alert-bg);
+  border-color: color-mix(in srgb, var(--alert) 35%, transparent);
+  color: var(--alert);
+}
+
+.notice--info {
+  background: var(--uncertain-bg);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+/* Stub-model banner. Loud on purpose: a placeholder verdict about a real
+   person's file must never be mistakable for a real one. */
+.notice--mock {
+  background: var(--caution-bg);
+  border-color: color-mix(in srgb, var(--caution) 45%, transparent);
+  color: var(--caution);
+  margin: 0 0 1.5rem;
+}
+
+.privacy-note {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 1.25rem 0 0;
+}
+
+/* --- Verdict --- */
+
+.verdict {
+  border-radius: var(--radius);
+  padding: 1.35rem 1.5rem;
+  border-left: 4px solid var(--uncertain);
+  background: var(--uncertain-bg);
+}
+
+.verdict--authentic {
+  border-left-color: var(--authentic);
+  background: var(--authentic-bg);
+}
+.verdict--uncertain {
+  border-left-color: var(--uncertain);
+  background: var(--uncertain-bg);
+}
+.verdict--caution {
+  border-left-color: var(--caution);
+  background: var(--caution-bg);
+}
+.verdict--alert {
+  border-left-color: var(--alert);
+  background: var(--alert-bg);
+}
+
+.verdict__kind {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+
+.verdict__headline {
+  margin: 0 0 0.5rem;
+  font-size: 1.4rem;
+  letter-spacing: -0.015em;
+}
+
+.verdict__confidence {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.verdict__detail {
+  margin: 0;
+  font-size: 0.93rem;
+}
+
+/* --- Evidence --- */
+
+.evidence {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.evidence__item {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 7px;
+  padding: 0.85rem 1rem;
+}
+
+.evidence__item--strong {
+  border-left-color: var(--alert);
+}
+.evidence__item--notable {
+  border-left-color: var(--caution);
+}
+.evidence__item--info {
+  border-left-color: var(--authentic);
+}
+
+.evidence__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  margin-bottom: 0.4rem;
+}
+
+.chip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+
+.chip--strong {
+  background: var(--alert-bg);
+  color: var(--alert);
+}
+.chip--notable {
+  background: var(--caution-bg);
+  color: var(--caution);
+}
+.chip--info {
+  background: var(--authentic-bg);
+  color: var(--authentic);
+}
+
+.evidence__where {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.evidence__summary {
+  margin: 0;
+  font-size: 0.93rem;
+}
+
+/* --- Signals --- */
+
+.signals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.signals__item {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.signals__label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.signals__detail {
+  font-size: 0.83rem;
+  color: var(--text-muted);
+}
+
+/* --- Progress --- */
+
+.progress-bar {
+  height: 5px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 1.25rem 0;
+}
+
+.progress-bar__fill {
+  height: 100%;
+  width: 35%;
+  background: var(--accent);
+  border-radius: 999px;
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+@keyframes slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar__fill {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
+.progress-steps {
+  margin: 0 0 1.25rem;
+  padding-left: 1.15rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+/* --- Result meta & disclaimer --- */
+
+.result-meta {
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.result-meta__deleted {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  color: var(--authentic);
+  font-weight: 600;
+}
+
+.result-meta code {
+  font-size: 0.85em;
+}
+
+.disclaimer {
+  margin: 1.25rem 0 0;
+  padding: 0.9rem 1rem;
+  background: var(--uncertain-bg);
+  border-radius: 7px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* --- Footer & utilities --- */
+
+.footer {
+  margin-top: 2.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 1.25rem;
+}
+
+.footer p {
+  margin: 0 0 0.5rem;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

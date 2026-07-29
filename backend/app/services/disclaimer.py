@@ -1,6 +1,10 @@
 """Result disclaimer text.
 
-*** DRAFT — NOT APPROVED. Pending sign-off before it is treated as final UI copy. ***
+*** PROVISIONAL — approved for development at step 2, NOT for public deployment. ***
+
+The step 2 frontend ships this wording as-is. It still needs a real review (and
+arguably a lawyer's eye) before the site is public — see docs/DECISIONS.md D5
+item 1. Do not treat "it's already in the UI" as sign-off.
 
 Kept in one module, server-side, so a single approved wording ships with every
 API response, the results dashboard, and the PDF evidence report. Copy that

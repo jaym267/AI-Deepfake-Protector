@@ -139,6 +139,30 @@ handled that properly.
 
 ## Status
 
-Planning stage — no code yet. Model architecture (Image, Audio, Raw Frames,
-Video Authenticator) and reference datasets identified. Next step: review
-dataset access/licensing, then start on the Image or Audio model.
+Build steps 1–2 of 7 complete (see `docs/CLAUDE_CODE_BRIEF.md` for the full
+sequence, `docs/DECISIONS.md` for decisions made along the way).
+
+- ✅ **1. Backend skeleton** — FastAPI, `/analyze/{image,audio,video}`,
+  `/report`, async 202 + polling contract, upload caps, delete-after-analysis.
+  Detection models are stubs returning deterministic placeholder scores.
+- ✅ **2. Frontend skeleton** — React + Vite + TypeScript upload UI and results
+  dashboard, running against the real backend. The site is demoable end to end.
+- ⬜ 3. Image model · ⬜ 4. Audio model · ⬜ 5. Raw Frames model ·
+  ⬜ 6. Video Authenticator · ⬜ 7. PDF evidence report
+
+**No real detection exists yet.** Every verdict the site currently produces is a
+placeholder derived from a hash of the uploaded file's bytes, and is labelled as
+such in the UI. Next step: dataset access/licensing review, then the Image model.
+
+### Running it locally
+
+```bash
+# backend — http://localhost:8000 (docs at /docs)
+cd backend
+python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
+.venv/Scripts/python -m uvicorn app.main:app --reload --port 8000
+
+# frontend — http://localhost:5173
+cd frontend
+npm install && npm run dev
+```
