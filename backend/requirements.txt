@@ -3,3 +3,19 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 pydantic==2.10.4
 pydantic-settings==2.7.0
+
+# --- Inference (build step 3) ---
+# CPU wheels. On a GPU host, install torch/torchvision from the matching CUDA
+# index instead; nothing in the app pins a device, it uses CUDA if torch
+# reports it available.
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0
+torchvision==0.28.0
+transformers==5.14.1
+pillow==12.3.0
+numpy==2.5.1
+
+# NOTE: scikit-learn is deliberately absent. The probe is *trained* with it (see
+# ml/requirements.txt) but exported as plain coefficients, so serving it needs
+# only a dot product and a sigmoid. Keeping it out of the runtime keeps the
+# deployment smaller and the inference path easier to audit.

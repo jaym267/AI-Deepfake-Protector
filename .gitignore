@@ -70,3 +70,6 @@ desktop.ini
 
 # TypeScript incremental build info
 *.tsbuildinfo
+
+# --- ML training cache (regenerable: datasets + cached CLIP features) ---
+ml/.cache/

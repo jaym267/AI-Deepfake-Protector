@@ -139,20 +139,32 @@ handled that properly.
 
 ## Status
 
-Build steps 1–2 of 7 complete (see `docs/CLAUDE_CODE_BRIEF.md` for the full
+Build steps 1–3 of 7 complete (see `docs/CLAUDE_CODE_BRIEF.md` for the full
 sequence, `docs/DECISIONS.md` for decisions made along the way).
 
 - ✅ **1. Backend skeleton** — FastAPI, `/analyze/{image,audio,video}`,
   `/report`, async 202 + polling contract, upload caps, delete-after-analysis.
-  Detection models are stubs returning deterministic placeholder scores.
 - ✅ **2. Frontend skeleton** — React + Vite + TypeScript upload UI and results
-  dashboard, running against the real backend. The site is demoable end to end.
-- ⬜ 3. Image model · ⬜ 4. Audio model · ⬜ 5. Raw Frames model ·
-  ⬜ 6. Video Authenticator · ⬜ 7. PDF evidence report
+  dashboard, running against the real backend.
+- ✅ **3. Image model** — frozen CLIP ViT-B/32 + linear probe, trained on
+  Tiny-GenImage. Real detection for **fully AI-generated images**.
+- ⬜ 4. Audio model · ⬜ 5. Raw Frames model · ⬜ 6. Video Authenticator ·
+  ⬜ 7. PDF evidence report
 
-**No real detection exists yet.** Every verdict the site currently produces is a
-placeholder derived from a hash of the uploaded file's bytes, and is labelled as
-such in the UI. Next step: dataset access/licensing review, then the Image model.
+**What is and isn't real right now:**
+
+| Upload | Result |
+|---|---|
+| **Image** | Real detection — but only for *fully AI-generated* images |
+| **Audio** | Placeholder, labelled as such in the UI |
+| **Video** | Placeholder, labelled as such in the UI |
+
+The image model does **not** detect face swaps or localised edits to real
+photographs. That head needs FaceForensics++ / Celeb-DF, which are gated behind
+institutional access this project does not have. Every image result states this
+limitation directly to the user.
+
+Next step: the Audio model (ASVspoof / WaveFake).
 
 ### Running it locally
 
@@ -166,3 +178,8 @@ python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
 cd frontend
 npm install && npm run dev
 ```
+
+The trained image head is committed (`models/`), so this works on clone. The
+CLIP backbone (~350MB) downloads from Hugging Face on the first image analysis.
+
+To retrain the image model from scratch, see [`ml/README.md`](ml/README.md).

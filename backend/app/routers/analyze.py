@@ -20,6 +20,7 @@ from ..schemas import (
     AnalysisStatusResponse,
     MediaKind,
 )
+from ..services.models.base import ModelUnavailable
 from ..services.pipeline import run_analysis
 from ..storage import store
 from ..uploads import staged_upload
@@ -43,6 +44,22 @@ def _handle(request: Request, kind: MediaKind, upload: UploadFile) -> AnalysisAc
     except HTTPException:
         store.delete(job.analysis_id)
         raise
+    except ModelUnavailable as exc:
+        # The server is misconfigured — weights missing. Not the caller's fault,
+        # and explicitly not a reason to fall back to a placeholder verdict.
+        store.delete(job.analysis_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from None
+    except ValueError as exc:
+        # Decoding failed: the declared content type and the actual bytes
+        # disagree. That is a bad upload, so 400 rather than a 500.
+        store.delete(job.analysis_id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from None
     except Exception:
         job.status = AnalysisStatus.FAILED
         job.error = "Analysis failed while processing this file."

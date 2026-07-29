@@ -1,0 +1,7 @@
+# Training-only dependencies. The backend does not install these.
+# Assumes backend/requirements.txt is already installed (torch, transformers,
+# pillow, numpy are shared with the inference path).
+
+datasets==5.0.1        # Tiny-GenImage loading
+scikit-learn==1.9.0    # logistic-regression probe + ROC/AUC metrics
+tqdm==4.67.1

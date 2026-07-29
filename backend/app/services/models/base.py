@@ -17,6 +17,17 @@ from pathlib import Path
 from typing import Protocol
 
 from ...schemas import EvidenceItem
+from .artifacts import Thresholds
+
+
+class ModelUnavailable(RuntimeError):
+    """A real model was asked for but its artifact isn't present.
+
+    Raised rather than falling back to a placeholder score. A detector that
+    silently degrades to guessing is worse than one that admits it is offline:
+    the caller cannot tell the difference, but the person reading the verdict
+    acts on it either way.
+    """
 
 
 @dataclass
@@ -24,6 +35,16 @@ class DetectorOutput:
     score: float
     evidence: list[EvidenceItem] = field(default_factory=list)
     notes: dict[str, float | str] = field(default_factory=dict)
+
+    #: False once this detector is a trained model rather than a placeholder.
+    #: Propagated to ``AnalysisResult.is_mock`` so the UI banner tracks reality
+    #: per model, instead of one global flag that stays wrong for three of the
+    #: four steps it takes to replace them all.
+    is_stub: bool = True
+
+    #: Band boundaries calibrated for *this* detector's score distribution.
+    #: None means the caller must fall back to placeholders (D4).
+    thresholds: Thresholds | None = None
 
 
 class Detector(Protocol):

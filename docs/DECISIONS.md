@@ -74,9 +74,10 @@ Four bands: `likely_authentic` / `uncertain` / `possibly_manipulated` /
 `uncertain` is a legitimate and common outcome, and must stay visible rather than
 being rounded into a confident answer.
 
-Current thresholds (`pipeline._band_verdict`) are placeholders. They must be
-re-derived from validation-set ROC curves once real models exist — picking
-thresholds by eye is how a detector ends up confidently wrong.
+Thresholds were placeholders through steps 1-2. **Resolved for the image model at
+step 3** — see D11. Audio, raw frames and the authenticator still use the
+eyeballed placeholders in `pipeline.PLACEHOLDER_THRESHOLDS` and must be
+recalibrated the same way as each becomes real.
 
 ---
 
@@ -85,7 +86,7 @@ thresholds by eye is how a detector ends up confidently wrong.
 | # | Item | Status |
 |---|------|--------|
 | 1 | Result disclaimer wording (`services/disclaimer.py`) | **PROVISIONAL — approved for development at step 2; still needs a real review before public deploy** |
-| 2 | GenImage CC BY-NC-SA 4.0 non-commercial clause vs. any future monetisation | **Open — see below** |
+| 2 | GenImage CC BY-NC-SA 4.0 non-commercial clause vs. any future monetisation | **Live constraint as of step 3 — trained weights now exist and are published. See below and D12** |
 | 3 | Rate limiting / abuse controls on a free public endpoint | Not started; needed before public deploy |
 | 4 | Duration limits (audio 2min, video 60s) | Not enforced yet — needs ffprobe, deferred to step 3-5. Byte caps are the effective limit today |
 
@@ -125,6 +126,133 @@ involved.
 - **C2PA provenance checks, rPPG/blood-flow, SyncNet-style lip-sync** — these
   appear in `README.md` but are not part of the four-model architecture in the
   brief. Not in scope for the current build order.
+
+---
+
+## D10 — Frozen CLIP backbone with a linear probe, not a fine-tuned CNN
+
+**Decided at:** step 3.
+
+The image model is a logistic regression over the 512-d output of a frozen CLIP
+ViT-B/32 vision tower. The backbone is not fine-tuned. Training code in `ml/`.
+
+**Why:** fine-tuning end-to-end on a fixed generator set produces a detector that
+learns each generator's fingerprint. It scores better on those generators and
+degrades sharply on new ones. Every image a user uploads comes from a generator
+newer than the training data, so in-distribution accuracy is close to worthless
+as a predictor of field behaviour, and cross-generator generalisation is the
+metric that matters. A linear probe on frozen CLIP features holds up
+substantially better on unseen generators (Ojha et al., CVPR 2023), and
+`ml/evaluate.py` measures that with a leave-one-generator-out study rather than
+assuming it.
+
+Two side effects, both convenient rather than motivating: the pipeline trains on
+a CPU in under an hour because features are extracted once and cached, and the
+head is 513 floats — small enough to commit as JSON and serve with a dot product,
+so scikit-learn stays out of the runtime.
+
+**Consequence:** the backbone is a downloaded dependency (~350MB from Hugging
+Face on first inference). Production deployments must pre-fetch it rather than
+fetching on a user's first request.
+
+---
+
+## D11 — Verdict thresholds are derived from the validation ROC, per detector
+
+**Decided at:** step 3. Discharges the obligation D4 left open.
+
+`ml/train.py:derive_thresholds` sets the three band boundaries from the
+validation ROC, each pinned to an explicit error rate rather than chosen by eye:
+
+- `authentic_below` — the 5th percentile of *fake* scores, so calling something
+  "likely authentic" misses at most ~5% of fakes.
+- `manipulated_above` — the 95th percentile of *real* scores, so a genuine photo
+  is branded "likely manipulated" at most ~5% of the time.
+- `possible_above` — the equal-error point, splitting the middle band.
+
+Thresholds ship inside the model artifact and travel with it, because they are
+only meaningful relative to the score distribution of the detector that produced
+them. `DetectorOutput.thresholds` carries them up to the pipeline;
+`PLACEHOLDER_THRESHOLDS` applies only to detectors that are still stubs.
+
+**Why per-detector rather than global:** a single 0.25/0.5/0.75 ladder assumes
+every model's scores are calibrated identically. They are not, and a shared
+ladder silently mis-bands whichever model deviates.
+
+---
+
+## D12 — The trained head is committed, and carries the dataset's licence
+
+**Decided at:** step 3.
+
+`models/image_synthetic_probe.json` is committed to the repo, along with its
+metrics and generalisation reports.
+
+**Why commit it:** at 513 floats it is small, diffable and inspectable, a clone
+produces real results without a 35-minute training run, and publishing the
+metrics next to the weights keeps the model's claims checkable against the
+artifact actually in use.
+
+**The licence consequence, which is real:** the head is trained on Tiny-GenImage
+(CC BY-NC-SA 4.0) and is therefore a derivative work. Committing it to a public
+repository is redistribution. On the cautious reading it inherits both clauses,
+so the artifact is **released under CC BY-NC-SA 4.0** and attributed, separately
+from whatever licence the rest of the repo carries. NonCommercial then binds any
+future ads, paid tier, or API business built on these coefficients — keeping the
+site free to users is probably not sufficient, since NC restricts commercial
+purpose rather than just direct charging.
+
+Every artifact embeds a `provenance` block (dataset, licence, generators, git
+SHA, date) so a commercially-clean retrain is a known, bounded job rather than
+archaeology. Good-faith reading, not legal advice; confirm with a lawyer before
+any money is involved.
+
+---
+
+## D13 — A model that cannot load refuses; it never falls back to a stub
+
+**Decided at:** step 3.
+
+Missing or malformed artifact → `ModelUnavailable` → HTTP 503. Undecodable
+upload → 400. Neither path produces a verdict.
+
+**Why:** a silent fallback to a placeholder score is indistinguishable from a
+real answer at the API boundary, and the person reading "likely manipulated"
+acts on it either way. The failure mode being prevented is someone being
+disbelieved because a weights file was missing from a deploy.
+
+The same reasoning drives `is_stub` moving from one global `MODELS_ARE_STUBS`
+flag onto each `DetectorOutput`. Between steps 3 and 6 a single boolean is
+necessarily wrong about something; `AnalysisResult.is_mock` is now true if *any*
+contributing detector was a placeholder, so a video — whose audio, frames and
+fusion are all still stubs — stays correctly marked even though the image model
+is real.
+
+---
+
+## D14 — Evidence may not claim more than the model can see
+
+**Decided at:** step 3.
+
+The step-1 stub emitted findings like "the edges of the face don't blend
+naturally into the hair and neck… around the jaw and hairline". A linear probe
+over a global image embedding produces one scalar. It has no spatial
+localisation, no per-region attribution, and no notion of a jaw. Those strings
+were fabricated and were removed when the real model landed; the replacements
+describe the strength and direction of a whole-image signal and nothing else.
+A test asserts every image finding leaves `region` and `start_seconds` null.
+
+Every image result also carries a permanent `scope_synthetic_only` finding
+stating that the check cannot detect face swaps or localised edits. That gap is
+not an edge case, it is half the intended model (head (a), blocked on gated
+datasets — D6). A confident "no signs of manipulation" on a face-swapped photo
+is precisely the failure that gets someone disbelieved, so the limit is stated
+to the user rather than left in a docstring.
+
+**Consequence for step 7:** when an LLM rewrites these summaries into report
+prose, it must be constrained to the evidence it is given. A model asked to
+"explain why this looks fake" will invent plausible detail, which is this same
+failure with better grammar.
 
 ---
 

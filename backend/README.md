@@ -1,8 +1,22 @@
 # Backend — AI Deepfake Protection API
 
-FastAPI service. **Build step 1 of 7: skeleton with stub detection models.**
-Every score is currently mock. `is_mock: true` on every result and
-`models_are_stubs: true` on `/health` mark this unambiguously.
+FastAPI service. **Build step 3 of 7.**
+
+| Detector | State |
+|---|---|
+| Image | **Real** — frozen CLIP ViT-B/32 + linear probe. Fully-synthetic detection only |
+| Audio | Stub (step 4) |
+| Raw Frames | Stub (step 5) |
+| Video Authenticator | Stub (step 6) |
+
+`GET /health` reports this per model. `is_mock` on a result is true if *any*
+detector that contributed to it was a stub — so image results are now real,
+while audio and video results are still placeholders.
+
+The image model needs `models/image_synthetic_probe.json` (committed) and
+downloads its CLIP backbone (~350MB) from Hugging Face on first inference. If the
+artifact is missing, `/analyze/image` returns **503** — it does not fall back to
+a stub score (D13).
 
 ## Run
 
@@ -49,15 +63,19 @@ app/
     report.py          Evidence report endpoint
   services/
     pipeline.py        Routing, verdict banding, public/internal split
-    disclaimer.py      Disclaimer copy (DRAFT — needs sign-off)
+    disclaimer.py      Disclaimer copy (PROVISIONAL — needs sign-off)
     report_service.py  Report generation (step 7)
     models/
       base.py                 Shared Detector contract; score = P(manipulated)
-      image_model.py          Step 3
+      artifacts.py            Artifact loading + frozen CLIP backbone (lazy)
+      image_model.py          Step 3 — REAL
       audio_model.py          Step 4
       raw_frames_model.py     Step 5
       video_authenticator.py  Step 6 — weighted-average fallback for now
 ```
+
+Training code lives in [`ml/`](../ml/README.md); artifacts in
+[`models/`](../models/README.md). Nothing in the request path imports from `ml/`.
 
 ## Routing
 
@@ -79,11 +97,20 @@ asserts this at the wire — if you add a field, keep it out of `AnalysisResult`
 a context manager that unlinks the temp file on every exit path. Don't copy the
 path anywhere that outlives it.
 
-## Known gaps at step 1
+## Known gaps at step 3
 
+- **The image model detects fully AI-generated images only.** It does not detect
+  face swaps or localised edits to real photographs — that head needs gated
+  datasets (D6). Every image result states this to the user.
+- **On video, the image model is still a stub.** Scoring frames needs frame
+  extraction, which arrives with ffmpeg/PyAV in step 5
+  (`ImageModel.analyze_video_frames`).
 - Duration limits (audio 2min / video 60s) are **not enforced** — needs ffprobe.
   Byte caps are the effective limit today.
-- Analysis runs inline in the request handler. Must move to a worker queue
-  before real inference lands in step 3.
+- **Inference runs in FastAPI's threadpool, not a worker queue.** Sync path
+  operations already run off the event loop, so CPU inference does not block it,
+  and a single image is fast enough that a queue would be premature. This stops
+  being true in step 5, when one video upload runs three models over many frames
+  — arq/Celery/RQ is required before then (D1).
 - Job store is an in-process dict — single worker only.
 - No rate limiting. Required before any public deploy.

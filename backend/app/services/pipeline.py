@@ -29,6 +29,7 @@ from ..schemas import (
 from ..storage import store
 from .disclaimer import RESULT_DISCLAIMER
 from .models import AudioModel, ImageModel, RawFramesModel, VideoAuthenticator
+from .models.artifacts import Thresholds
 from .models.base import DetectorOutput
 
 image_model = ImageModel()
@@ -36,38 +37,72 @@ audio_model = AudioModel()
 raw_frames_model = RawFramesModel()
 video_authenticator = VideoAuthenticator()
 
-#: Flip to False in step 6, once every model in the routing table is real.
-MODELS_ARE_STUBS = True
+#: Which detectors are trained models rather than placeholders. Reported by
+#: /health. Per-model rather than one global flag, because between steps 3 and 6
+#: a single boolean is necessarily wrong about something.
+REAL_MODELS: dict[str, bool] = {
+    "image": True,  # step 3 — frozen CLIP + linear probe
+    "audio": False,  # step 4
+    "raw_frames": False,  # step 5
+    "video_authenticator": False,  # step 6
+}
+
+#: Used only by detectors that have no calibration of their own — i.e. the ones
+#: that are still stubs. Picked by eye, which is exactly why they are not
+#: allowed anywhere near a trained model's output (D4).
+PLACEHOLDER_THRESHOLDS = Thresholds(
+    authentic_below=0.25,
+    possible_above=0.50,
+    manipulated_above=0.75,
+)
 
 
-def _band_verdict(score: float) -> Verdict:
+def _band_verdict(score: float, thresholds: Thresholds | None) -> Verdict:
     """Map P(manipulated) onto a verdict band.
 
     Four bands, never two. A binary real/fake badge would misrepresent what the
-    models can actually support, and 'uncertain' has to be a visible outcome
-    rather than being rounded into one of the confident answers.
+    models can support, and 'uncertain' has to stay a visible outcome rather than
+    being rounded into one of the confident answers.
 
-    Thresholds are provisional and must be re-derived from validation-set ROC
-    curves once real models exist (steps 3-6) — picking them by eye is exactly
-    how a detector ends up confidently wrong.
+    Boundaries come from the detector that produced the score, because they are
+    only meaningful relative to that detector's score distribution. The image
+    probe's are derived from its validation ROC and pinned to explicit error
+    rates (see ml/train.py:derive_thresholds); stub detectors fall back to the
+    placeholders above.
     """
-    if score < 0.25:
+    bounds = thresholds or PLACEHOLDER_THRESHOLDS
+    if score < bounds.authentic_below:
         return Verdict.LIKELY_AUTHENTIC
-    if score < 0.50:
+    if score < bounds.possible_above:
         return Verdict.UNCERTAIN
-    if score < 0.75:
+    if score < bounds.manipulated_above:
         return Verdict.POSSIBLY_MANIPULATED
     return Verdict.LIKELY_MANIPULATED
 
 
-def _band_confidence(score: float, signal_count: int) -> ConfidenceBand:
-    """Coarse confidence: how far from the fence, and how many signals agreed.
+def _band_confidence(
+    score: float,
+    signal_count: int,
+    thresholds: Thresholds | None,
+) -> ConfidenceBand:
+    """Coarse confidence: how far from the decision fence, and how many signals agreed.
 
     Returned as a band rather than a number on purpose — a precise percentage
     reads as more authoritative than the underlying model warrants, and is a
     more useful gradient for anyone tuning a fake to slip under a threshold.
+
+    The fence is the detector's own equal-error point, not a hardcoded 0.5.
+    Those coincide only by accident, and on a calibrated model the difference
+    decides whether a borderline result is shown as 'moderate' or 'low'.
     """
-    margin = abs(score - 0.5) * 2  # 0.0 at the fence, 1.0 at either extreme
+    bounds = thresholds or PLACEHOLDER_THRESHOLDS
+    fence = bounds.possible_above
+    # Normalise distance from the fence by whichever side the score falls on, so
+    # an asymmetric calibration doesn't make one direction look more certain
+    # purely because its threshold sits closer to the end of the range.
+    span = (1.0 - fence) if score >= fence else fence
+    margin = abs(score - fence) / max(span, 1e-6)
+
     if signal_count >= 3:
         margin += 0.1
     if margin >= 0.6:
@@ -106,7 +141,10 @@ def run_analysis(media_kind: MediaKind, path: Path) -> tuple[AnalysisResult, Int
         signals = ["audio"]
 
     else:  # VIDEO — all three upstream models, then the authenticator.
-        image_out = image_model.analyze(path)
+        # Not image_model.analyze(): that decodes a still image and would reject
+        # an MP4 outright. Scoring a video with the frame-level model needs frame
+        # extraction, which arrives in step 5.
+        image_out = image_model.analyze_video_frames(path)
         frames_out = raw_frames_model.analyze(path)
         if _has_audio_track(path):
             audio_out = audio_model.analyze(path)
@@ -124,17 +162,23 @@ def run_analysis(media_kind: MediaKind, path: Path) -> tuple[AnalysisResult, Int
 
     upstream_count = sum(1 for out in (image_out, audio_out, frames_out) if out is not None)
 
+    # Mock if *anything* that fed this verdict was a placeholder. A video whose
+    # frame analysis is real but whose audio and fusion are stubs is still a
+    # result nobody should act on, and the banner has to say so.
+    contributing = [out for out in (image_out, audio_out, frames_out, final) if out is not None]
+    is_mock = any(out.is_stub for out in contributing)
+
     result = AnalysisResult(
         analysis_id="",  # filled in by the caller, which owns the job record
         media_kind=media_kind,
-        verdict=_band_verdict(final.score),
-        confidence=_band_confidence(final.score, upstream_count),
+        verdict=_band_verdict(final.score, final.thresholds),
+        confidence=_band_confidence(final.score, upstream_count, final.thresholds),
         evidence=final.evidence,
         signals_used=signals,
         analysed_at=analysed_at,
         media_deleted=settings.delete_upload_after_analysis,
         disclaimer=RESULT_DISCLAIMER,
-        is_mock=MODELS_ARE_STUBS,
+        is_mock=is_mock,
     )
 
     internal = InternalScores(

@@ -70,11 +70,17 @@ export const CONFIDENCE_COPY: Record<ConfidenceBand, string> = {
 /** Plain-language names for `signals_used`, so the breakdown is legible to a
  *  non-expert. Which checks ran is safe to disclose; what they scored is not. */
 export const SIGNAL_COPY: Record<string, { label: string; detail: string }> = {
+  // Describes what the step 3 model actually does. It compares whole-image
+  // visual statistics against those of known AI generators; it has no spatial
+  // localisation and no face-swap detection, so this copy must not imply either
+  // (docs/DECISIONS.md D14). The earlier wording promised "blending seams and
+  // warped features", which belongs to a head that does not exist yet.
   image: {
-    label: "Visual artifacts",
+    label: "AI-generation patterns",
     detail:
-      "Looks at individual frames for blending seams, warped features and the " +
-      "texture patterns AI image generators tend to leave.",
+      "Compares the image's overall visual statistics against those of known " +
+      "AI image generators. Does not detect face swaps or edits to part of a " +
+      "real photo.",
   },
   audio: {
     label: "Voice authenticity",

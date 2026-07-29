@@ -1,0 +1,54 @@
+{
+  "validation_auc": 0.9579,
+  "validation_accuracy_at_0.5": 0.8919,
+  "thresholds": {
+    "authentic_below": 0.271009,
+    "possible_above": 0.533493,
+    "manipulated_above": 0.774793,
+    "equal_error_rate": 0.108
+  },
+  "per_generator": {
+    "Real": {
+      "n": 3500,
+      "accuracy": 0.884,
+      "mean_score": 0.1611
+    },
+    "ADM": {
+      "n": 500,
+      "accuracy": 0.918,
+      "mean_score": 0.8838
+    },
+    "BigGAN": {
+      "n": 500,
+      "accuracy": 0.986,
+      "mean_score": 0.9517
+    },
+    "GLIDE": {
+      "n": 500,
+      "accuracy": 1.0,
+      "mean_score": 0.9776
+    },
+    "Midjourney": {
+      "n": 500,
+      "accuracy": 0.89,
+      "mean_score": 0.8475
+    },
+    "SD15": {
+      "n": 500,
+      "accuracy": 0.902,
+      "mean_score": 0.839
+    },
+    "VQDM": {
+      "n": 500,
+      "accuracy": 0.752,
+      "mean_score": 0.7102
+    },
+    "Wukong": {
+      "n": 500,
+      "accuracy": 0.85,
+      "mean_score": 0.7853
+    }
+  },
+  "n_train": 28000,
+  "n_validation": 7000
+}

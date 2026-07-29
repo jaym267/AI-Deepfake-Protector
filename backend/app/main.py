@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .routers import analyze, report
-from .services.pipeline import MODELS_ARE_STUBS
+from .services.pipeline import REAL_MODELS
 
 app = FastAPI(
     title="AI Deepfake Protection API",
@@ -39,7 +39,26 @@ app.include_router(report.router)
 
 @app.get("/health", tags=["meta"])
 def health() -> dict[str, object]:
-    return {"status": "ok", "models_are_stubs": MODELS_ARE_STUBS}
+    """Liveness plus which detectors are real.
+
+    ``models_are_stubs`` is kept for the frontend, which uses it only to decide
+    whether to warn that nothing here is a genuine result yet. ``models`` is the
+    per-detector truth, which is what anyone debugging actually needs between
+    steps 3 and 6 while the four models land one at a time.
+    """
+    from .services.models.artifacts import load_probe
+    from .services.models.image_model import ARTIFACT_NAME
+
+    image_ready = load_probe(ARTIFACT_NAME) is not None
+    models = dict(REAL_MODELS)
+    # A real model whose weights are missing is not real on *this* server.
+    models["image"] = models["image"] and image_ready
+
+    return {
+        "status": "ok",
+        "models_are_stubs": not all(models.values()),
+        "models": models,
+    }
 
 
 @app.get("/limits", tags=["meta"])

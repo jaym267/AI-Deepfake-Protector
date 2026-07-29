@@ -1,0 +1,43 @@
+{
+  "mean_held_out_auc": 0.9084,
+  "worst_held_out_auc": 0.795,
+  "worst_generator": "VQDM",
+  "per_generator": {
+    "ADM": {
+      "held_out_auc": 0.8682,
+      "held_out_recall_at_0.5": 0.608,
+      "n_test_fakes": 500
+    },
+    "BigGAN": {
+      "held_out_auc": 0.9658,
+      "held_out_recall_at_0.5": 0.946,
+      "n_test_fakes": 500
+    },
+    "GLIDE": {
+      "held_out_auc": 0.9922,
+      "held_out_recall_at_0.5": 1.0,
+      "n_test_fakes": 500
+    },
+    "Midjourney": {
+      "held_out_auc": 0.9112,
+      "held_out_recall_at_0.5": 0.742,
+      "n_test_fakes": 500
+    },
+    "SD15": {
+      "held_out_auc": 0.9367,
+      "held_out_recall_at_0.5": 0.812,
+      "n_test_fakes": 500
+    },
+    "VQDM": {
+      "held_out_auc": 0.795,
+      "held_out_recall_at_0.5": 0.374,
+      "n_test_fakes": 500
+    },
+    "Wukong": {
+      "held_out_auc": 0.8897,
+      "held_out_recall_at_0.5": 0.662,
+      "n_test_fakes": 500
+    }
+  },
+  "interpretation": "Each figure is measured against a generator excluded from that probe's training data. The worst case is the number to quote when describing what this model does on generators released after it was trained; the mean is optimistic by comparison."
+}
