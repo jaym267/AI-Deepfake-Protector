@@ -25,10 +25,15 @@ from app.main import app
 from app.services.models.artifacts import load_probe
 from app.services.models.image_model import ARTIFACT_NAME
 
+from .conftest import make_mp4, make_png, make_wav
+
 client = TestClient(app)
 
-WAV_BYTES = b"RIFF" + b"\x00" * 2048
-MP4_BYTES = b"\x00\x00\x00\x20ftypmp42" + b"\x00" * 2048
+#: Real encoded media. Since duration limits landed, every audio and video
+#: upload is opened with ffmpeg, so placeholder bytes no longer reach the models
+#: — they are rejected as unreadable containers first. See tests/conftest.py.
+WAV_BYTES = make_wav(2)
+MP4_BYTES = make_mp4(2)
 
 #: Bytes that pass the content-type allowlist but are not a decodable image.
 CORRUPT_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 2048
@@ -40,21 +45,7 @@ needs_image_model = pytest.mark.skipif(
 )
 
 
-def real_png(colour: tuple[int, int, int] = (120, 90, 60), size: int = 64) -> bytes:
-    """A small but genuinely decodable PNG.
-
-    The step-1 stub hashed raw bytes, so a PNG magic number followed by zeros was
-    enough. The real model decodes and embeds the image, so fixtures have to be
-    actual images now.
-    """
-    from PIL import Image
-
-    buffer = io.BytesIO()
-    Image.new("RGB", (size, size), colour).save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-PNG_BYTES = real_png()
+PNG_BYTES = make_png()
 
 
 def _upload(kind: str, data: bytes, content_type: str, name: str = "sample"):
@@ -98,6 +89,11 @@ def test_limits_match_config():
         ("audio", WAV_BYTES, "audio/wav"),
         ("video", MP4_BYTES, "video/mp4"),
     ],
+    # Explicit ids because the fixtures are now real encoded media. Without
+    # them pytest derives the id from the bytes themselves and writes it into
+    # PYTEST_CURRENT_TEST, which blows past the 32767-char Windows environment
+    # variable limit and fails the run during teardown.
+    ids=["image", "audio", "video"],
 )
 def test_analyze_accepts_and_completes(kind, data, ctype):
     response = _upload(kind, data, ctype)

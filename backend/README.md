@@ -105,12 +105,44 @@ path anywhere that outlives it.
 - **On video, the image model is still a stub.** Scoring frames needs frame
   extraction, which arrives with ffmpeg/PyAV in step 5
   (`ImageModel.analyze_video_frames`).
-- Duration limits (audio 2min / video 60s) are **not enforced** — needs ffprobe.
-  Byte caps are the effective limit today.
 - **Inference runs in FastAPI's threadpool, not a worker queue.** Sync path
   operations already run off the event loop, so CPU inference does not block it,
   and a single image is fast enough that a queue would be premature. This stops
   being true in step 5, when one video upload runs three models over many frames
   — arq/Celery/RQ is required before then (D1).
-- Job store is an in-process dict — single worker only.
-- No rate limiting. Required before any public deploy.
+- Job store **and rate-limiter state** are in-process — single worker only. Two
+  workers means two independent rate-limit allowances. Both need Redis together
+  before scaling out.
+- **First image request after start takes ~19s** while the CLIP backbone loads;
+  warm requests are ~500ms. Pre-fetch the backbone before a public deploy.
+
+## Abuse controls
+
+**Rate limiting** (`app/ratelimit.py`) — middleware, not a per-route dependency,
+so a route added later cannot forget it. Two sliding windows per client, because
+a burst limit alone misses a slow drip and a sustained limit alone lets through a
+damaging spike.
+
+| Scope | Default |
+|---|---|
+| `POST /analyze/*`, `/report` | 5/min **and** 30/hour |
+| Everything else (polling, `/health`, `/limits`) | 300/min |
+
+Reads are deliberately generous: the frontend polls ~1/s while a job runs (D1).
+Returns `429` with `Retry-After`. Configure via `ADP_ANALYZE_BURST_LIMIT`,
+`ADP_ANALYZE_SUSTAINED_LIMIT`, `ADP_READ_LIMIT`, `ADP_RATE_LIMIT_ENABLED`.
+
+`X-Forwarded-For` is **ignored** unless `ADP_TRUST_FORWARDED_FOR=true`. Any
+client can send that header, so honouring it on a directly-exposed server makes
+the limiter bypassable with one curl flag. Enable it only behind a proxy that
+overwrites the header.
+
+**Duration limits** (`app/media_probe.py`) — audio 2min, video 60s, enforced with
+PyAV. Byte caps are a poor proxy for cost: a 25MB H.264 file can be ten minutes
+long. Over-long media returns `413`; unparseable containers return `400`.
+
+The probe also checks the **stream type**, which is stronger than the declared
+Content-Type: an upload to `/analyze/audio` must actually contain an audio
+stream, so a renamed file is caught even though the client controls the header.
+Media whose duration cannot be determined is rejected rather than waved through —
+it could be arbitrarily long, which is the thing being bounded.

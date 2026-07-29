@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
+from .ratelimit import RateLimitMiddleware
 from .routers import analyze, report
 from .services.pipeline import REAL_MODELS
 
@@ -24,6 +25,15 @@ app = FastAPI(
         "and only for 24 hours."
     ),
 )
+
+# Order matters, and it is the reverse of how it reads. `add_middleware`
+# inserts at the front of the stack, so the LAST one added is the OUTERMOST.
+# CORS must therefore be added last, so that it wraps the rate limiter and
+# still attaches headers to a 429 the limiter returns without calling through.
+# Get this backwards and a rate-limited browser client sees an opaque CORS
+# failure instead of the "please wait N seconds" message.
+# Asserted by test_rate_limited_response_still_has_cors_headers.
+app.add_middleware(RateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

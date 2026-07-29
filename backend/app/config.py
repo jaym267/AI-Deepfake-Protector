@@ -39,6 +39,26 @@ class Settings(BaseSettings):
     # Exposing them would let someone iterate on a deepfake until it passes.
     expose_internal_scores: bool = False
 
+    # --- Rate limiting (D5 item 3) ---
+    # /analyze accepts a 25MB upload and runs inference on it, so writes are
+    # capped hard and reads are not: the frontend polls ~1/s while a job runs
+    # (D1), and a limit tuned for uploads would break normal use.
+    #
+    # Two windows because one is always wrong — a burst limit alone misses a
+    # slow drip, a sustained limit alone lets through a damaging spike.
+    rate_limit_enabled: bool = True
+    analyze_burst_limit: int = 5
+    analyze_burst_window: int = 60
+    analyze_sustained_limit: int = 30
+    analyze_sustained_window: int = 3600
+    read_limit: int = 300
+    read_window: int = 60
+
+    # Off by default: any client can send X-Forwarded-For, so honouring it on a
+    # directly-exposed server makes the limiter bypassable with one curl flag.
+    # Turn on only behind a proxy that overwrites the header.
+    trust_forwarded_for: bool = False
+
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 

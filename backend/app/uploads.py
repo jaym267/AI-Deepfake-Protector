@@ -98,10 +98,13 @@ def staged_upload(kind: MediaKind, upload: UploadFile) -> Iterator[StagedUpload]
                 detail="Uploaded file is empty.",
             )
 
-        # TODO(step 3-5): duration limits (audio 2min / video 60s) need ffprobe or
-        # librosa to read container metadata. Deferred until the real decoding
-        # pipeline exists so the skeleton has no binary dependency. The byte caps
-        # above are the effective limit for now.
+        # Duration cap. Deliberately after the file is fully staged: the
+        # container metadata that carries duration can sit at either end of the
+        # file depending on how it was written, so there is nothing reliable to
+        # check mid-stream. The byte cap above is what bounds the damage until
+        # this point.
+        _enforce_duration(kind, tmp_path)
+
         yield StagedUpload(
             path=tmp_path,
             size_bytes=size,
@@ -111,6 +114,35 @@ def staged_upload(kind: MediaKind, upload: UploadFile) -> Iterator[StagedUpload]
     finally:
         # Runs on success, on validation failure, and on unexpected errors.
         tmp_path.unlink(missing_ok=True)
+
+
+MAX_SECONDS: dict[MediaKind, float | None] = {
+    MediaKind.IMAGE: None,  # no duration
+    MediaKind.AUDIO: settings.max_audio_seconds,
+    MediaKind.VIDEO: settings.max_video_seconds,
+}
+
+
+def _enforce_duration(kind: MediaKind, path: Path) -> None:
+    """Reject over-long or unparseable media, as an HTTPException.
+
+    Translated here rather than in media_probe so that module stays free of web
+    framework types and remains usable from the training code.
+    """
+    from .media_probe import DurationExceeded, UnreadableMedia, enforce_limits
+
+    try:
+        enforce_limits(kind, path, MAX_SECONDS[kind])
+    except DurationExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from None
+    except UnreadableMedia as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from None
 
 
 def _suffix_for(filename: str | None) -> str:

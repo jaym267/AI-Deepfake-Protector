@@ -10,7 +10,13 @@
 import { useCallback, useRef, useState } from "react";
 import type { DragEvent } from "react";
 
-import { ACCEPT_ATTRIBUTE, formatBytes, isValid, validate } from "../api/media";
+import {
+  ACCEPT_ATTRIBUTE,
+  formatBytes,
+  formatDuration,
+  isValid,
+  validate,
+} from "../api/media";
 import type { Limits, MediaKind } from "../api/types";
 
 interface Props {
@@ -88,9 +94,11 @@ export function UploadPanel({ limits, busy, onSubmit }: Props) {
         </p>
         {limits && (
           <p className="dropzone__limits">
-            Up to {formatBytes(limits.image.max_bytes)} for images,{" "}
-            {formatBytes(limits.audio.max_bytes)} for audio, and{" "}
-            {formatBytes(limits.video.max_bytes)} for video.
+            Up to {formatBytes(limits.image.max_bytes)} for images;{" "}
+            {formatBytes(limits.audio.max_bytes)} and{" "}
+            {formatDuration(limits.audio.max_seconds)} for audio;{" "}
+            {formatBytes(limits.video.max_bytes)} and{" "}
+            {formatDuration(limits.video.max_seconds)} for video.
           </p>
         )}
       </div>

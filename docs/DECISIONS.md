@@ -87,8 +87,8 @@ recalibrated the same way as each becomes real.
 |---|------|--------|
 | 1 | Result disclaimer wording (`services/disclaimer.py`) | **PROVISIONAL — approved for development at step 2; still needs a real review before public deploy** |
 | 2 | GenImage CC BY-NC-SA 4.0 non-commercial clause vs. any future monetisation | **Live constraint as of step 3 — trained weights now exist and are published. See below and D12** |
-| 3 | Rate limiting / abuse controls on a free public endpoint | Not started; needed before public deploy |
-| 4 | Duration limits (audio 2min, video 60s) | Not enforced yet — needs ffprobe, deferred to step 3-5. Byte caps are the effective limit today |
+| 3 | Rate limiting / abuse controls on a free public endpoint | **Done — see D15.** In-process only; needs Redis before running more than one worker |
+| 4 | Duration limits (audio 2min, video 60s) | **Done — see D16.** Enforced with PyAV |
 
 ### On item 2 — the GenImage licence
 
@@ -253,6 +253,89 @@ to the user rather than left in a docstring.
 prose, it must be constrained to the evidence it is given. A model asked to
 "explain why this looks fake" will invent plausible detail, which is this same
 failure with better grammar.
+
+---
+
+## D15 — Rate limiting is middleware, with two windows and no trust in XFF
+
+**Decided at:** post-step-3. Closes D5 item 3.
+
+Sliding-window limiter in `app/ratelimit.py`. `POST /analyze/*` and `/report` get
+5/min and 30/hour; everything else gets 300/min.
+
+**Middleware rather than a per-route dependency.** A dependency has to be
+remembered on every new route, and the routes added in steps 4 and 7 would be
+exactly the expensive ones. Middleware cannot be forgotten.
+
+**Two windows, because one is always wrong.** A burst limit alone misses a slow
+drip that still exhausts the inference path; a sustained limit alone permits a
+spike that takes the service down before it trips.
+
+**Reads are limited far more generously than writes.** The frontend polls once a
+second while a job runs (D1). A limit tuned for uploads would break normal use,
+and the usual response to that is to disable the control rather than tune it.
+
+**`X-Forwarded-For` is ignored by default.** Any client can send it, so
+honouring it on a directly-exposed server makes the limiter bypassable in one
+line. Behind a trusted proxy, enable `trust_forwarded_for` — and note the code
+takes the *rightmost* entry, since the leftmost is client-supplied.
+
+**A sliding rather than fixed window**, because a fixed window lets a client send
+its whole allowance in the last second of one window and again in the first
+second of the next — double the intended rate, precisely when it hurts.
+
+**Rejected requests do not extend the window.** Otherwise a client that keeps
+retrying locks itself out indefinitely, which punishes an impatient user far
+more than an attacker.
+
+**Middleware order is load-bearing and reads backwards.** `add_middleware`
+inserts at the front of the stack, so the *last* registered is the *outermost*.
+CORS must therefore be added after the limiter, so it wraps it and still attaches
+headers to a 429 the limiter returns without calling through. Get this wrong and
+a rate-limited browser client sees an opaque CORS failure instead of the "please
+wait" message. Asserted by `test_rate_limited_response_still_has_cors_headers`.
+
+**Consequences:**
+- State is per process, like the job store. Two workers means two independent
+  allowances; both need Redis together before scaling out.
+- The client dictionary is bounded (`MAX_TRACKED_CLIENTS`) and evicted, so a
+  spoofed-IP flood cannot turn the limiter itself into the memory exhaustion it
+  exists to prevent.
+- Not a defence against a distributed flood. That needs a CDN or WAF in front.
+
+---
+
+## D16 — Duration limits via PyAV, and the container is trusted over the header
+
+**Decided at:** post-step-3. Closes D5 item 4.
+
+Audio capped at 2 minutes, video at 60 seconds, enforced in
+`app/media_probe.py` after the file is staged.
+
+**Why byte caps were not enough:** they are a poor proxy for compute. A 25MB
+H.264 file can be ten minutes long, and step 5 will run three models across its
+frames. Duration is what actually bounds the work.
+
+**PyAV rather than shelling out to ffprobe:** it ships its own ffmpeg libraries,
+so there is no system binary to install, no subprocess to sanitise, and no
+parsing of another program's stdout. Step 5 needs PyAV for frame extraction
+regardless.
+
+**The check runs after staging, not mid-stream**, because the metadata carrying
+duration can sit at either end of the file depending on how it was written. The
+byte cap is what bounds the damage until that point.
+
+**Stream type is validated too**, which is a stronger check than Content-Type:
+the client controls the header, but not the container. An upload to
+`/analyze/audio` must actually contain an audio stream.
+
+**Unknown duration is rejected, not accepted.** A file whose length cannot be
+determined could be arbitrarily long, which is the exact thing being bounded.
+
+**Security consequence:** this hands attacker-controlled bytes to ffmpeg's
+demuxers, which have a real CVE history. The exposure is unavoidable — analysing
+uploaded media is the product — but it argues for keeping PyAV patched and, before
+a public deploy, running analysis in a sandbox rather than in the API process.
 
 ---
 

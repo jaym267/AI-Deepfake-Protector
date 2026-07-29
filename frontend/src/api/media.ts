@@ -42,6 +42,15 @@ export function formatBytes(bytes: number): string {
   return `${bytes} bytes`;
 }
 
+/** Duration caps are server-enforced; this only advertises them up front so
+ *  someone doesn't push 25MB uphill to be told the clip is too long. */
+export function formatDuration(seconds: number | undefined): string {
+  if (seconds === undefined) return "";
+  if (seconds < 90) return `${Math.round(seconds)} seconds`;
+  const minutes = seconds / 60;
+  return Number.isInteger(minutes) ? `${minutes} minutes` : `${minutes.toFixed(1)} minutes`;
+}
+
 export interface ValidationFailure {
   message: string;
 }
