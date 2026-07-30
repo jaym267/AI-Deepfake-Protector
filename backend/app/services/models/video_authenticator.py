@@ -41,6 +41,10 @@ class VideoAuthenticator:
     name = "video_authenticator"
 
     #: False until a meta-classifier is actually trained and loaded (step 6).
+    #: This is the single source of truth for whether fusion is real: it is
+    #: propagated onto every DetectorOutput as ``is_stub`` rather than being a
+    #: second, separately-maintained flag that could drift out of agreement with
+    #: it. Step 6 flips this one value.
     is_trained = False
 
     def fuse(
@@ -73,8 +77,20 @@ class VideoAuthenticator:
         evidence.sort(key=lambda e: severity_rank.get(e.severity.value, 3))
 
         notes: dict[str, float | str] = {
-            "fusion_method": "weighted_average_fallback",
+            "fusion_method": "trained" if self.is_trained else "weighted_average_fallback",
             "signals_present": ",".join(sorted(present)),
         }
 
-        return DetectorOutput(score=round(fused, 4), evidence=evidence, notes=notes)
+        return DetectorOutput(
+            score=round(fused, 4),
+            evidence=evidence,
+            notes=notes,
+            # Derived from is_trained, not hardcoded, so step 6 cannot flip one
+            # and forget the other. The fallback is a placeholder by definition,
+            # so a verdict it produced must not present as model-learned.
+            is_stub=not self.is_trained,
+            # Fixed weights have no calibrated score distribution behind them, so
+            # there are no meaningful band boundaries to offer (D11). The pipeline
+            # falls back to PLACEHOLDER_THRESHOLDS until step 6 derives real ones.
+            thresholds=None,
+        )

@@ -5,10 +5,15 @@ only as a sub-component of video analysis: a voicemail or a recorded scam call
 is a first-class upload, and for those this model's output *is* the final
 verdict with nothing downstream of it.
 
-Planned approach (step 4): fine-tune a pretrained speech backbone (Wav2Vec2 or
-similar) on ASVspoof + WaveFake, both open to individuals. Signals of interest
-are vocoder artifacts, unnatural prosody and breath patterns, and spectral
-discontinuities at splice points.
+Planned approach (step 4): a frozen speech backbone (WavLM) with a linear probe,
+trained on ASVspoof 2019 LA, mirroring the image model's architecture. Scoring
+happens over overlapping windows rather than the whole clip, which means this
+model — unlike the image probe — will be able to report genuine timestamps.
+
+This stub emits NO findings of its own. Earlier versions invented them, including
+fabricated timestamps ("the voice carries a faint synthetic texture", 2.0s-5.5s).
+Those were removed: they are the practice D14 prohibits, and `is_mock` marking a
+result as placeholder does not make a fabricated finding inside it acceptable.
 """
 
 from __future__ import annotations
@@ -18,53 +23,28 @@ from pathlib import Path
 from ...schemas import EvidenceItem, Severity
 from .base import DetectorOutput, stable_pseudo_score
 
+#: The one finding a stub is entitled to make: that it isn't a model yet.
+#: Not an empty list, because the API contract requires every result to carry at
+#: least one finding and an audio-only upload has nothing else to show.
+NOT_IMPLEMENTED_NOTE = EvidenceItem(
+    code="model_not_implemented",
+    summary=(
+        "Audio analysis isn't available yet. This result is a placeholder and "
+        "says nothing about the recording you uploaded."
+    ),
+    severity=Severity.INFO,
+)
+
 
 class AudioModel:
     name = "audio"
 
     def analyze(self, path: Path) -> DetectorOutput:
         score = stable_pseudo_score(path, salt="audio")
-
-        evidence: list[EvidenceItem] = []
-        if score > 0.6:
-            evidence.append(
-                EvidenceItem(
-                    code="vocoder_artifacts",
-                    summary=(
-                        "The voice carries a faint synthetic texture typical of "
-                        "speech produced by a voice-cloning tool rather than "
-                        "recorded from a person."
-                    ),
-                    severity=Severity.STRONG,
-                    start_seconds=2.0,
-                    end_seconds=5.5,
-                )
-            )
-        if score > 0.4:
-            evidence.append(
-                EvidenceItem(
-                    code="absent_breath",
-                    summary=(
-                        "The speaker never pauses to breathe where a person "
-                        "normally would, which is common in generated speech."
-                    ),
-                    severity=Severity.NOTABLE,
-                )
-            )
-        if not evidence:
-            evidence.append(
-                EvidenceItem(
-                    code="natural_speech_pattern",
-                    summary=(
-                        "Breathing, pacing and background noise in this "
-                        "recording look like a genuine recording of a person."
-                    ),
-                    severity=Severity.INFO,
-                )
-            )
-
         return DetectorOutput(
             score=score,
-            evidence=evidence,
+            evidence=[NOT_IMPLEMENTED_NOTE],
             notes={"backbone": "stub", "speech_detected": "unknown"},
+            is_stub=True,
+            thresholds=None,
         )

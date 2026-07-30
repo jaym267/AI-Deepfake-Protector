@@ -202,6 +202,35 @@ def test_undecodable_image_is_400_not_500():
     assert "image" in response.json()["detail"].lower()
 
 
+# --- Stubs may not fabricate findings (D14) ---------------------------------
+
+
+@pytest.mark.parametrize(
+    ("kind", "data", "ctype"),
+    [("audio", WAV_BYTES, "audio/wav"), ("video", MP4_BYTES, "video/mp4")],
+    ids=["audio", "video"],
+)
+def test_stub_models_emit_no_invented_findings(kind, data, ctype):
+    """A placeholder may say it is a placeholder, and nothing else.
+
+    The stubs previously invented findings with timestamps for media they never
+    decoded — "the speaker never pauses to breathe", 2.0s-5.5s. `is_mock` marks
+    the result as placeholder, but that does not license a fabricated finding
+    inside it.
+    """
+    result = _result(_upload(kind, data, ctype))
+    assert result["is_mock"] is True
+
+    for item in result["evidence"]:
+        assert item["code"] == "model_not_implemented", (
+            f"stub emitted a substantive finding: {item['code']}"
+        )
+        # A model that never decoded the file cannot localise anything in it.
+        assert item["start_seconds"] is None
+        assert item["end_seconds"] is None
+        assert item["region"] is None
+
+
 def test_missing_artifact_returns_503_and_never_a_fake_verdict(monkeypatch):
     """A model that cannot load must refuse, not guess (D9)."""
     monkeypatch.setattr("app.services.models.image_model.load_probe", lambda _: None)
