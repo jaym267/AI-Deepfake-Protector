@@ -1,0 +1,27 @@
+# Normalise line endings in the repo to LF, regardless of the platform a
+# contributor is on. Without this, committing from Windows produces a CRLF
+# warning on nearly every file and risks whole-file diffs when the project is
+# later touched from Linux or CI.
+* text=auto eol=lf
+
+# Binary-ish assets that must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.mp4 binary
+*.mov binary
+*.webm binary
+*.wav binary
+*.mp3 binary
+*.npz binary
+*.pt binary
+*.pth binary
+*.onnx binary
+*.safetensors binary
+*.pdf binary
+
+# Model artifacts are JSON and should diff as text, but they are generated —
+# mark them so review tooling can de-emphasise them.
+models/*.json linguist-generated=true
+frontend/package-lock.json linguist-generated=true
