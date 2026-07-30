@@ -33,11 +33,12 @@ from pathlib import Path
 from ...schemas import EvidenceItem, Severity
 from .base import DetectorOutput, stable_pseudo_score
 
-#: See audio_model.NOT_IMPLEMENTED_NOTE — same reasoning. Video results also
-#: carry findings from the other stubs, so this one rarely stands alone, but it
-#: must still be truthful about what produced it.
+#: See audio_model.NOT_IMPLEMENTED_NOTE — same reasoning, including why the code
+#: names this model specifically. Video results also carry findings from the other
+#: stubs, so this one rarely stands alone, but it must still be truthful about
+#: what produced it and distinguishable from the ones beside it.
 NOT_IMPLEMENTED_NOTE = EvidenceItem(
-    code="model_not_implemented",
+    code="raw_frames_model_not_implemented",
     summary=(
         "Frame-by-frame video analysis isn't available yet. This result is a "
         "placeholder and says nothing about the video you uploaded."

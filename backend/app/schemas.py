@@ -9,12 +9,18 @@ the server:
                             plain-language evidence. This is what the results
                             dashboard renders.
 * ``InternalScores``      — server-side only. Per-model numeric scores and the
-                            thresholds behind the verdict. Never serialised into
-                            a response unless ``settings.expose_internal_scores``
-                            is explicitly turned on for local debugging.
+                            thresholds behind the verdict. Reachable only from
+                            ``AnalysisJob``, which is never returned.
 
 The split exists because full per-model scores would turn the public site into a
 free evaluation harness for anyone tuning a deepfake to evade detection.
+
+The enforcement is structural, and deliberately not a setting. There was once an
+``expose_internal_scores`` flag, documented as the mechanism that kept these
+server-side; nothing read it. What actually prevents disclosure is that
+``AnalysisStatusResponse`` has no field able to carry these values, so no code
+path can serialise them and there is no flag to misconfigure in production.
+``test_internal_scores_are_never_returned`` asserts it at the wire.
 """
 
 from __future__ import annotations

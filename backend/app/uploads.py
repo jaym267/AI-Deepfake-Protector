@@ -1,12 +1,31 @@
 """Upload intake: validation, bounded spooling to disk, guaranteed cleanup.
 
-Two rules this module enforces:
+Rules this module enforces:
 
-1. The size cap is applied *while streaming*, not after. Trusting
-   ``Content-Length`` or reading the whole body first would let a single request
-   exhaust memory or disk regardless of the configured limit.
+1. The size cap is re-checked here while copying, and the temp file never grows
+   past it.
+
+   This module used to claim the cap was applied "while streaming, not after",
+   and that reading the whole body first "would let a single request exhaust
+   memory or disk regardless of the configured limit". The second half was
+   correct and described what this code was actually doing. With
+   ``UploadFile = File(...)``, Starlette parses the entire multipart body before
+   the endpoint runs, so the loop below reads from a temp file Starlette already
+   wrote — it was never reading from the network. The cap decided the status code
+   and nothing else.
+
+   The ceiling that actually bounds what reaches disk now lives in
+   ``bodylimit.py``, which runs as middleware before any parsing. The check here
+   is kept as a second line of defence: it is the only one that knows the size of
+   the *file* rather than the size of the request that carried it.
+
 2. The temp file is always removed, on every exit path, including errors. The
    privacy commitment is that an upload does not outlive its analysis.
+
+3. The container is probed exactly once. The probe result travels with the
+   staged upload rather than being recomputed downstream, so the pipeline cannot
+   disagree with the validator about what is in the file — and so attacker
+   bytes are handed to ffmpeg's demuxers once per upload instead of twice.
 """
 
 from __future__ import annotations
@@ -18,8 +37,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from fastapi import HTTPException, UploadFile, status
+from fastapi import HTTPException, Request, UploadFile, status
 
+from .bodylimit import TRUNCATED_FLAG
 from .config import settings
 from .schemas import MediaKind
 
@@ -47,6 +67,12 @@ class StagedUpload:
     filename: str | None
     content_type: str | None
 
+    #: Whether the container carries an audio stream, from the single probe in
+    #: ``_enforce_duration``. ``None`` for images, which are never probed.
+    #: Consumed by the pipeline so a silent video drops the audio term from
+    #: fusion instead of folding in a score for a track that isn't there.
+    has_audio: bool | None = None
+
 
 def _human_mb(n: int) -> str:
     return f"{n / (1024 * 1024):.0f}MB"
@@ -67,9 +93,12 @@ def validate_content_type(kind: MediaKind, content_type: str | None) -> None:
 
 
 @contextlib.contextmanager
-def staged_upload(kind: MediaKind, upload: UploadFile) -> Iterator[StagedUpload]:
-    """Stream an upload to a temp file under a hard size cap, then always delete it."""
+def staged_upload(
+    kind: MediaKind, upload: UploadFile, request: Request | None = None
+) -> Iterator[StagedUpload]:
+    """Copy an upload to a temp file under a hard size cap, then always delete it."""
     validate_content_type(kind, upload.content_type)
+    _reject_if_truncated(request)
     limit = MAX_BYTES[kind]
 
     fd, tmp_name = tempfile.mkstemp(prefix="adp_", suffix=_suffix_for(upload.filename))
@@ -101,15 +130,16 @@ def staged_upload(kind: MediaKind, upload: UploadFile) -> Iterator[StagedUpload]
         # Duration cap. Deliberately after the file is fully staged: the
         # container metadata that carries duration can sit at either end of the
         # file depending on how it was written, so there is nothing reliable to
-        # check mid-stream. The byte cap above is what bounds the damage until
-        # this point.
-        _enforce_duration(kind, tmp_path)
+        # check mid-stream. The middleware ceiling is what bounds the damage
+        # until this point.
+        probe = _enforce_duration(kind, tmp_path)
 
         yield StagedUpload(
             path=tmp_path,
             size_bytes=size,
             filename=upload.filename,
             content_type=upload.content_type,
+            has_audio=None if kind is MediaKind.IMAGE else probe.has_audio,
         )
     finally:
         # Runs on success, on validation failure, and on unexpected errors.
@@ -123,8 +153,31 @@ MAX_SECONDS: dict[MediaKind, float | None] = {
 }
 
 
-def _enforce_duration(kind: MediaKind, path: Path) -> None:
+def _reject_if_truncated(request: Request | None) -> None:
+    """Refuse a body the middleware had to cut off at the ceiling.
+
+    Only reachable for a chunked request with no ``Content-Length``, which
+    ``bodylimit`` cannot reject up front. Truncated bytes must never be analysed:
+    a short file can still decode, and a verdict on partial media is a wrong
+    answer rather than an error, which is the worse failure for this product.
+    """
+    if request is None:
+        return
+    if getattr(request.state, TRUNCATED_FLAG, False):
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                "This upload is larger than this service accepts. "
+                "Limits are strict while this is in development."
+            ),
+        )
+
+
+def _enforce_duration(kind: MediaKind, path: Path):
     """Reject over-long or unparseable media, as an HTTPException.
+
+    Returns the probe result so the caller can pass it downstream instead of
+    opening the file with ffmpeg a second time.
 
     Translated here rather than in media_probe so that module stays free of web
     framework types and remains usable from the training code.
@@ -132,7 +185,7 @@ def _enforce_duration(kind: MediaKind, path: Path) -> None:
     from .media_probe import DurationExceeded, UnreadableMedia, enforce_limits
 
     try:
-        enforce_limits(kind, path, MAX_SECONDS[kind])
+        return enforce_limits(kind, path, MAX_SECONDS[kind])
     except DurationExceeded as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,

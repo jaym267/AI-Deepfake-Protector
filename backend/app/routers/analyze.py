@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 
+from ..errors import UndecodableUpload, UploadTooLarge
 from ..schemas import (
     AnalysisAccepted,
     AnalysisStatus,
@@ -37,10 +38,10 @@ def _handle(request: Request, kind: MediaKind, upload: UploadFile) -> AnalysisAc
     # is already the async one, so step 3 moves this body into a worker without
     # the client noticing.
     try:
-        with staged_upload(kind, upload) as staged:
+        with staged_upload(kind, upload, request) as staged:
             job.status = AnalysisStatus.RUNNING
             store.update(job)
-            result, internal = run_analysis(kind, staged.path)
+            result, internal = run_analysis(kind, staged.path, has_audio=staged.has_audio)
     except HTTPException:
         store.delete(job.analysis_id)
         raise
@@ -52,9 +53,23 @@ def _handle(request: Request, kind: MediaKind, upload: UploadFile) -> AnalysisAc
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from None
-    except ValueError as exc:
+    except UploadTooLarge as exc:
+        # Valid media, but more than this service will spend memory decoding —
+        # a decompression bomb, or simply a very large photograph.
+        store.delete(job.analysis_id)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from None
+    except UndecodableUpload as exc:
         # Decoding failed: the declared content type and the actual bytes
         # disagree. That is a bad upload, so 400 rather than a 500.
+        #
+        # Matched on this type specifically, not on ValueError. The broad version
+        # reflected str(exc) from *any* ValueError — including ones raised deep
+        # inside PIL, numpy or torch, whose text can carry filesystem paths — into
+        # a 400 body, and let an internal invariant failure (for example
+        # VideoAuthenticator.fuse receiving no signals) present as a user error.
         store.delete(job.analysis_id)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

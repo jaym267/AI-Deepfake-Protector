@@ -39,6 +39,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from ...config import settings
+from ...errors import UndecodableUpload, UploadTooLarge
 from ...schemas import EvidenceItem, Severity
 from .artifacts import Thresholds, embed_image, load_probe
 from .base import DetectorOutput, ModelUnavailable
@@ -47,13 +49,26 @@ logger = logging.getLogger(__name__)
 
 ARTIFACT_NAME = "image_synthetic_probe"
 
-#: Always attached. The scope gap is not an edge case; it is half the model.
+#: Formats this model will decode, matching the Content-Type allowlist in
+#: uploads.py. That allowlist checks a header the client controls; this checks
+#: what the bytes actually are, which is the same reasoning media_probe.py
+#: applies to audio and video containers. Without it the allowlist was
+#: decorative: PIL happily decoded GIF, TIFF and BMP uploads declared as
+#: image/png, so the real decoder surface was every format PIL supports rather
+#: than the three that were reviewed.
+DECODABLE_FORMATS = frozenset({"JPEG", "PNG", "WEBP"})
+
+#: Always attached. Neither gap is an edge case: the first is half the intended
+#: model, and the second is the difference between the calibration's promise and
+#: what it can deliver on a generator released after training.
 SCOPE_NOTE = EvidenceItem(
     code="scope_synthetic_only",
     summary=(
         "This check looks for images generated entirely by AI. It is not able "
         "to detect a real photograph that has had a face swapped in or a region "
-        "edited, so it cannot rule that out."
+        "edited, so it cannot rule that out. It is also weaker against image "
+        "generators newer than the ones it was trained on, and new generators "
+        "appear constantly."
     ),
     severity=Severity.INFO,
 )
@@ -70,16 +85,7 @@ class ImageModel:
                 "Its trained weights are missing."
             )
 
-        from PIL import Image, UnidentifiedImageError
-
-        try:
-            with Image.open(path) as image:
-                image.load()
-                features = embed_image(image, probe.backbone_id)
-        except (UnidentifiedImageError, OSError) as exc:
-            # Content-type said image, decoding disagreed. Truncated uploads and
-            # renamed files both land here.
-            raise ValueError("This file could not be read as an image.") from exc
+        features = self._embed(path, probe.backbone_id)
 
         score = probe.score(features)
         return DetectorOutput(
@@ -93,6 +99,60 @@ class ImageModel:
             is_stub=False,
             thresholds=probe.thresholds,
         )
+
+    def _embed(self, path: Path, backbone_id: str):
+        """Decode an image safely, then embed it.
+
+        Three checks before any pixel buffer is allocated, in the order that
+        keeps the cheapest first:
+
+        1. ``Image.open`` reads the header only, so the format is known before
+           anything is decoded.
+        2. The format is checked against the allowlist — the declared
+           Content-Type is not evidence, since the client writes it.
+        3. Decoded dimensions are checked before ``load()``. This is the
+           decompression-bomb guard, and it is not implied by the byte cap: a
+           140KB PNG decodes to 144 million pixels, and ``.convert("RGB")``
+           downstream triples the allocation. PIL's own ceiling only warns below
+           2x its default while still allocating, and raises
+           ``DecompressionBombError`` above it — which is not an ``OSError``, so
+           it escaped the old handler and surfaced as a 500 rather than a 400.
+        """
+        from PIL import Image, UnidentifiedImageError
+
+        try:
+            with Image.open(path) as image:
+                image_format = (image.format or "").upper()
+                if image_format not in DECODABLE_FORMATS:
+                    raise UndecodableUpload(
+                        f"This file is {image_format or 'an unrecognised format'}, "
+                        "which this tool doesn't read. Please upload a JPEG, PNG "
+                        "or WebP image."
+                    )
+
+                width, height = image.size
+                if width * height > settings.max_image_pixels:
+                    megapixels = (width * height) / 1_000_000
+                    allowed = settings.max_image_pixels / 1_000_000
+                    raise UploadTooLarge(
+                        f"This image is {width}x{height} ({megapixels:.0f} "
+                        f"megapixels), over the {allowed:.0f} megapixel limit. "
+                        "Resizing it will let it through."
+                    )
+
+                image.load()
+                return embed_image(image, backbone_id)
+        except Image.DecompressionBombError as exc:
+            # Backstop: PIL's own guard, in case its accounting and ours ever
+            # disagree. Same class of problem, so the same status code.
+            raise UploadTooLarge(
+                "This image is too large to process safely. "
+                "Resizing it will let it through."
+            ) from exc
+        except (UnidentifiedImageError, OSError) as exc:
+            # Content-type said image, decoding disagreed. Truncated uploads and
+            # renamed files both land here.
+            raise UndecodableUpload("This file could not be read as an image.") from exc
 
     def analyze_video_frames(self, path: Path) -> DetectorOutput:
         """Per-frame spatial scoring for a video — STILL A STUB (step 5).
@@ -155,7 +215,11 @@ class ImageModel:
                 code="no_synthetic_signature",
                 summary=(
                     "This image's visual statistics match camera photographs "
-                    "rather than the AI generators this check knows about."
+                    "rather than the AI generators this check knows about. On "
+                    "images from a generator it hasn't seen before, this check "
+                    "misses a substantial share of fakes, so this is weak "
+                    "evidence that something is genuine rather than strong "
+                    "evidence."
                 ),
                 severity=Severity.INFO,
             )

@@ -24,6 +24,7 @@ from .config import (
     BATCH_SIZE,
     CACHE_DIR,
     CLIP_MODEL_ID,
+    CLIP_REVISION,
     DATASET_ID,
     FEATURES_DIR,
     ensure_dirs,
@@ -41,8 +42,8 @@ def extract(split: str, limit: int | None = None) -> None:
     device = _device()
     print(f"[features] split={split} device={device} model={CLIP_MODEL_ID}")
 
-    processor = CLIPImageProcessor.from_pretrained(CLIP_MODEL_ID)
-    model = CLIPVisionModelWithProjection.from_pretrained(CLIP_MODEL_ID)
+    processor = CLIPImageProcessor.from_pretrained(CLIP_MODEL_ID, revision=CLIP_REVISION)
+    model = CLIPVisionModelWithProjection.from_pretrained(CLIP_MODEL_ID, revision=CLIP_REVISION)
     model.to(device).eval()
 
     dataset = load_dataset(DATASET_ID, split=split, cache_dir=str(CACHE_DIR))

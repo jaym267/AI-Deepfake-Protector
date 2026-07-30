@@ -1,41 +1,41 @@
 {
-  "mean_held_out_auc": 0.9084,
-  "worst_held_out_auc": 0.795,
+  "mean_held_out_auc": 0.9072,
+  "worst_held_out_auc": 0.7918,
   "worst_generator": "VQDM",
   "per_generator": {
     "ADM": {
-      "held_out_auc": 0.8682,
-      "held_out_recall_at_0.5": 0.608,
+      "held_out_auc": 0.8674,
+      "held_out_recall_at_0.5": 0.604,
       "n_test_fakes": 500
     },
     "BigGAN": {
-      "held_out_auc": 0.9658,
+      "held_out_auc": 0.9649,
       "held_out_recall_at_0.5": 0.946,
       "n_test_fakes": 500
     },
     "GLIDE": {
-      "held_out_auc": 0.9922,
-      "held_out_recall_at_0.5": 1.0,
+      "held_out_auc": 0.9921,
+      "held_out_recall_at_0.5": 0.998,
       "n_test_fakes": 500
     },
     "Midjourney": {
-      "held_out_auc": 0.9112,
-      "held_out_recall_at_0.5": 0.742,
+      "held_out_auc": 0.9081,
+      "held_out_recall_at_0.5": 0.75,
       "n_test_fakes": 500
     },
     "SD15": {
-      "held_out_auc": 0.9367,
-      "held_out_recall_at_0.5": 0.812,
+      "held_out_auc": 0.9375,
+      "held_out_recall_at_0.5": 0.816,
       "n_test_fakes": 500
     },
     "VQDM": {
-      "held_out_auc": 0.795,
-      "held_out_recall_at_0.5": 0.374,
+      "held_out_auc": 0.7918,
+      "held_out_recall_at_0.5": 0.378,
       "n_test_fakes": 500
     },
     "Wukong": {
-      "held_out_auc": 0.8897,
-      "held_out_recall_at_0.5": 0.662,
+      "held_out_auc": 0.8886,
+      "held_out_recall_at_0.5": 0.652,
       "n_test_fakes": 500
     }
   },

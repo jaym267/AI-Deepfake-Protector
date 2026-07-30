@@ -34,10 +34,18 @@ export function EvidenceList({ evidence }: { evidence: EvidenceItem[] }) {
 
   return (
     <ul className="evidence">
-      {evidence.map((item) => {
+      {/* Keyed on position, not on `code`. Codes are stable identifiers but not
+          guaranteed unique within one result — a video collects findings from
+          three detectors — and this list is never reordered or filtered, so the
+          index is the honest key. The backend also namespaces its stub codes per
+          model now; this is the belt to that braces. */}
+      {evidence.map((item, index) => {
         const span = timespan(item);
         return (
-          <li key={item.code} className={`evidence__item evidence__item--${item.severity}`}>
+          <li
+            key={`${item.code}-${index}`}
+            className={`evidence__item evidence__item--${item.severity}`}
+          >
             <div className="evidence__head">
               <span className={`chip chip--${item.severity}`}>
                 {SEVERITY_LABEL[item.severity]}

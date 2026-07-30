@@ -215,7 +215,11 @@ def test_forwarded_for_is_ignored_unless_trusted(enable_rate_limiting, monkeypat
 
 
 def test_client_eviction_bounds_memory():
-    """A spoofed-IP flood must not grow the limiter without bound."""
+    """A spoofed-IP flood must not grow the limiter without bound.
+
+    The assertion used to be `<= MAX_TRACKED_CLIENTS + 500` after inserting
+    exactly that many keys, which held whether eviction ran or not.
+    """
     from app.ratelimit import MAX_TRACKED_CLIENTS
 
     limiter = SlidingWindowLimiter()
@@ -224,4 +228,31 @@ def test_client_eviction_bounds_memory():
     for index in range(MAX_TRACKED_CLIENTS + 500):
         limiter.check(f"client-{index}", rule, now=now)
 
-    assert len(limiter._hits) <= MAX_TRACKED_CLIENTS + 500
+    assert len(limiter._hits) < MAX_TRACKED_CLIENTS
+
+
+def test_eviction_does_not_reset_active_clients_allowances():
+    """Eviction used to call `_hits.clear()` when nothing was stale, which reset
+    every client's allowance — including the allowance of whoever caused the
+    flood. That turns the memory bound into an attacker-triggerable reset of the
+    control itself. The least-recently-active entries go instead, so a client
+    still hammering the endpoint keeps its counter."""
+    limiter = SlidingWindowLimiter()
+    rule = Rule(limit=1, window_seconds=600, name="t")
+    now = 1000.0
+
+    # The attacker spends its single allowance, then floods with fresh identities.
+    assert limiter.check("attacker", rule, now=now) is None
+    assert limiter.check("attacker", rule, now=now) is not None
+
+    from app.ratelimit import MAX_TRACKED_CLIENTS
+
+    for index in range(MAX_TRACKED_CLIENTS + 100):
+        # Each fresh identity is *more* recently active than the attacker's own
+        # entry, and the attacker keeps touching its own key to stay live.
+        limiter.check(f"flood-{index}", rule, now=now + index)
+        limiter.check("attacker", rule, now=now + index)
+
+    assert len(limiter._hits) < MAX_TRACKED_CLIENTS + 100
+    # Still blocked: the flood did not buy the attacker a fresh allowance.
+    assert limiter.check("attacker", rule, now=now + MAX_TRACKED_CLIENTS) is not None

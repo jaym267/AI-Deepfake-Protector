@@ -64,3 +64,34 @@ item 2.
 detect face swaps or localised edits to real photographs; that head needs gated
 face-manipulation datasets (D6). Every image result states this limitation to
 the user directly, and it should keep doing so until head (a) actually exists.
+
+## Reading the thresholds
+
+`authentic_below` is **not** calibrated on the validation split, unlike the other
+two. It comes from the pooled fake scores of leave-one-generator-out probes — i.e.
+from fakes produced by a generator the model never trained on. The artifact
+records both numbers so the difference stays visible:
+
+| | value |
+|---|---|
+| `authentic_below` (held-out generators) | 0.0297 |
+| `authentic_below_if_in_distribution` | 0.2571 |
+
+The in-distribution figure is what shipped through step 3, and it was roughly 9x
+more permissive than its own stated "misses at most ~5% of fakes" promise once
+measured against an unseen generator. `authentic_below` is the boundary that
+decides whether someone is told their file shows no signs of manipulation, so it
+is the one that has to be measured against the hardest available population. See
+`docs/DECISIONS.md` D11.
+
+`possible_above` and `manipulated_above` stay on the validation split, correctly:
+the real-image distribution does not shift when a new generator ships.
+
+## The backbone revision is pinned, and must match
+
+`backbone.revision` in the artifact, `CLIP_REVISION` in
+`backend/app/services/models/artifacts.py`, and `CLIP_REVISION` in `ml/config.py`
+are the same commit. A probe's coefficients only mean anything against the feature
+space they were fitted on, and a backbone swapped underneath them fails silently —
+the dot product still returns a number, the API still returns a verdict. Change
+the revision and the head must be retrained.

@@ -32,6 +32,20 @@ ARTIFACT_DIR = REPO_ROOT / "models"
 
 _clip_lock = threading.Lock()
 
+#: Immutable commit pin for the backbone.
+#:
+#: Every Python dependency in this project is pinned to an exact version, and
+#: then 350MB of model weights were fetched from whatever a moving tag happened
+#: to point at. A backbone swapped underneath a linear probe does not fail
+#: loudly — the probe still returns a number in [0,1], the API still returns a
+#: verdict, and the only symptom is that the coefficients no longer mean anything
+#: because they were fitted against a different feature space. Pinning makes that
+#: substitution impossible rather than merely unlikely.
+#:
+#: Must match ml/config.py: the features the probe was trained on came from this
+#: exact revision, and a mismatch between training and inference is silent.
+CLIP_REVISION = "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
+
 
 @dataclass(frozen=True)
 class Thresholds:
@@ -106,9 +120,9 @@ def _load_clip(model_id: str):
     import torch
     from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 
-    logger.info("Loading CLIP backbone %s", model_id)
-    processor = CLIPImageProcessor.from_pretrained(model_id)
-    model = CLIPVisionModelWithProjection.from_pretrained(model_id)
+    logger.info("Loading CLIP backbone %s at %s", model_id, CLIP_REVISION[:12])
+    processor = CLIPImageProcessor.from_pretrained(model_id, revision=CLIP_REVISION)
+    model = CLIPVisionModelWithProjection.from_pretrained(model_id, revision=CLIP_REVISION)
     model.eval()
     torch.set_grad_enabled(False)
     return processor, model

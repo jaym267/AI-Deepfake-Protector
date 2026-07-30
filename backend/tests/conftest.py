@@ -64,7 +64,13 @@ def make_wav(seconds: float, rate: int = 8000) -> bytes:
 
 
 def make_mp4(seconds: float, fps: int = 10, size: int = 64) -> bytes:
-    """A real H.264 MP4 of the requested duration."""
+    """A real H.264 MP4 of the requested duration, video stream only.
+
+    Deliberately silent. Plenty of genuine video has no audio track, and since the
+    pipeline now reads `has_audio` from the container probe rather than assuming
+    True, the silent case is the one that exercises the authenticator's weight
+    renormalisation. Use `make_mp4_with_audio` for the all-signals path.
+    """
     import av
     import numpy as np
 
@@ -81,6 +87,44 @@ def make_mp4(seconds: float, fps: int = 10, size: int = 64) -> bytes:
         for packet in stream.encode(frame):
             container.mux(packet)
     for packet in stream.encode():
+        container.mux(packet)
+    container.close()
+    return buffer.getvalue()
+
+
+def make_mp4_with_audio(seconds: float, fps: int = 10, size: int = 64) -> bytes:
+    """An MP4 carrying both a video and an AAC audio stream."""
+    import av
+    import numpy as np
+
+    buffer = io.BytesIO()
+    container = av.open(buffer, mode="w", format="mp4")
+
+    video = container.add_stream("libx264", rate=fps)
+    video.width = video.height = size
+    video.pix_fmt = "yuv420p"
+
+    rate = 44100
+    audio = container.add_stream("aac", rate=rate)
+
+    for index in range(int(seconds * fps)):
+        frame = av.VideoFrame.from_ndarray(
+            np.full((size, size, 3), index % 255, dtype=np.uint8), format="rgb24"
+        )
+        for packet in video.encode(frame):
+            container.mux(packet)
+
+    # One second of silence at a time, in the layout the encoder asked for.
+    samples = np.zeros((1, rate), dtype=np.int16)
+    for _ in range(max(int(seconds), 1)):
+        frame = av.AudioFrame.from_ndarray(samples, format="s16", layout="mono")
+        frame.rate = rate
+        for packet in audio.encode(frame):
+            container.mux(packet)
+
+    for packet in video.encode():
+        container.mux(packet)
+    for packet in audio.encode():
         container.mux(packet)
     container.close()
     return buffer.getvalue()

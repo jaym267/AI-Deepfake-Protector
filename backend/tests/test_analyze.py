@@ -25,7 +25,7 @@ from app.main import app
 from app.services.models.artifacts import load_probe
 from app.services.models.image_model import ARTIFACT_NAME
 
-from .conftest import make_mp4, make_png, make_wav
+from .conftest import make_mp4, make_mp4_with_audio, make_png, make_wav
 
 client = TestClient(app)
 
@@ -33,7 +33,8 @@ client = TestClient(app)
 #: upload is opened with ffmpeg, so placeholder bytes no longer reach the models
 #: — they are rejected as unreadable containers first. See tests/conftest.py.
 WAV_BYTES = make_wav(2)
-MP4_BYTES = make_mp4(2)
+MP4_BYTES = make_mp4(2)  # silent
+MP4_WITH_AUDIO = make_mp4_with_audio(2)
 
 #: Bytes that pass the content-type allowlist but are not a decodable image.
 CORRUPT_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 2048
@@ -120,9 +121,20 @@ def test_routing_matches_architecture():
         assert _result(_upload("image", PNG_BYTES, "image/png"))["signals_used"] == ["image"]
 
     assert _result(_upload("audio", WAV_BYTES, "audio/wav"))["signals_used"] == ["audio"]
-    assert _result(_upload("video", MP4_BYTES, "video/mp4"))["signals_used"] == [
+    assert _result(_upload("video", MP4_WITH_AUDIO, "video/mp4"))["signals_used"] == [
         "image",
         "audio",
+        "raw_frames",
+        "video_authenticator",
+    ]
+
+
+def test_video_without_an_audio_track_drops_the_audio_signal():
+    """`has_audio` now comes from the container probe rather than a hardcoded
+    True, so a silent video renormalises the audio term away instead of folding in
+    a stub score for a track that does not exist."""
+    assert _result(_upload("video", MP4_BYTES, "video/mp4"))["signals_used"] == [
+        "image",
         "raw_frames",
         "video_authenticator",
     ]
@@ -202,6 +214,28 @@ def test_undecodable_image_is_400_not_500():
     assert "image" in response.json()["detail"].lower()
 
 
+@needs_image_model
+def test_low_score_result_does_not_overstate_itself():
+    """The 'nothing found' finding has to admit its own false-negative rate.
+
+    `authentic_below` is calibrated so that at most ~5% of fakes fall below it —
+    but only for the generators in the training data. Measured against a held-out
+    generator the miss rate is far higher (see
+    models/image_synthetic_probe.generalisation.json), and every real upload comes
+    from a generator newer than the training set. A flat "matches camera
+    photographs" would promise more than the artifact supports.
+    """
+    result = _result(_upload("image", PNG_BYTES, "image/png"))
+    findings = {item["code"]: item["summary"] for item in result["evidence"]}
+
+    scope = findings["scope_synthetic_only"]
+    assert "newer" in scope.lower(), "scope note must flag the unseen-generator gap"
+
+    if "no_synthetic_signature" in findings:
+        summary = findings["no_synthetic_signature"].lower()
+        assert "misses" in summary or "weak evidence" in summary
+
+
 # --- Stubs may not fabricate findings (D14) ---------------------------------
 
 
@@ -222,13 +256,27 @@ def test_stub_models_emit_no_invented_findings(kind, data, ctype):
     assert result["is_mock"] is True
 
     for item in result["evidence"]:
-        assert item["code"] == "model_not_implemented", (
+        assert item["code"].endswith("model_not_implemented"), (
             f"stub emitted a substantive finding: {item['code']}"
         )
         # A model that never decoded the file cannot localise anything in it.
         assert item["start_seconds"] is None
         assert item["end_seconds"] is None
         assert item["region"] is None
+
+
+def test_evidence_codes_are_unique_within_a_result():
+    """The dashboard identifies findings by `code`, so duplicates collide.
+
+    A video collects findings from the audio and raw-frames detectors, which both
+    used a shared "model_not_implemented" code — so every video result rendered
+    two list items with the same React key. Needs the audio-bearing fixture: a
+    silent video only produces one of the two colliding findings.
+    """
+    result = _result(_upload("video", MP4_WITH_AUDIO, "video/mp4"))
+    codes = [item["code"] for item in result["evidence"]]
+    assert len(codes) > 1, "fixture must produce findings from more than one detector"
+    assert len(codes) == len(set(codes)), f"duplicate evidence codes: {codes}"
 
 
 def test_missing_artifact_returns_503_and_never_a_fake_verdict(monkeypatch):

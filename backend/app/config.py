@@ -22,6 +22,15 @@ class Settings(BaseSettings):
     max_audio_seconds: float = 120.0
     max_video_seconds: float = 60.0
 
+    # Decoded-pixel ceiling, which is a different limit from the byte cap and
+    # not implied by it. A 140KB PNG decodes to 144 million pixels, and PIL's
+    # own default guard (89M) only *warns* below 2x that while still allocating
+    # the buffer — so a file well inside the 5MB cap could ask for hundreds of
+    # megabytes of RAM, times however many uploads are in flight. 40M pixels is
+    # comfortably above any real photograph (a 24MP camera is 6000x4000) and
+    # well below a bomb.
+    max_image_pixels: int = 40_000_000
+
     # --- Privacy ---
     # The uploaded file is deleted as soon as scores have been extracted from it.
     # Only the derived JSON result (and, later, evidence thumbnails) is retained.
@@ -33,11 +42,17 @@ class Settings(BaseSettings):
     # from the job store. The uploaded media is already gone by this point.
     result_ttl_seconds: int = 24 * 60 * 60
 
-    # --- Disclosure ---
-    # When False (the default, and the only correct setting for the public
-    # deployment), per-model numeric scores are never serialised to a client.
-    # Exposing them would let someone iterate on a deepfake until it passes.
-    expose_internal_scores: bool = False
+    # How often the expiry sweep runs. Expiry used to be lazy — checked only
+    # when someone fetched a job — which drops nothing in the normal access
+    # pattern, because the normal pattern is to poll once, read the result and
+    # never come back. Every analysis then held a record for the lifetime of the
+    # process. A sweep on a timer is what actually collects them.
+    purge_interval_seconds: int = 600
+
+    # Hard ceiling on retained records, independent of the TTL. The TTL bounds
+    # how long a record lives; this bounds how many can exist at once, so a
+    # burst cannot outrun the sweep. At ~1KB per record this is a few tens of MB.
+    max_tracked_jobs: int = 20_000
 
     # --- Rate limiting (D5 item 3) ---
     # /analyze accepts a 25MB upload and runs inference on it, so writes are

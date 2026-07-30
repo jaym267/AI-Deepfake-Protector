@@ -53,11 +53,15 @@ See [docs/DECISIONS.md](../docs/DECISIONS.md#d1--async-job--polling-not-synchron
 
 ```
 app/
-  main.py              FastAPI app, CORS, health/limits
-  config.py            Upload limits, retention, disclosure flags
+  main.py              FastAPI app, middleware order, health/limits, expiry sweep
+  config.py            Upload limits, retention, pixel ceiling, rate limits
   schemas.py           Public vs internal result split
+  errors.py            Domain exceptions carrying user-safe messages
+  bodylimit.py         Request-body ceiling, enforced before the body is parsed
+  ratelimit.py         Per-client sliding-window limiter (middleware)
+  media_probe.py       Container duration + stream-type validation (PyAV)
   storage.py           Job store (in-memory; swap for Redis before scaling)
-  uploads.py           Streaming size cap + guaranteed temp-file cleanup
+  uploads.py           Per-file size cap + guaranteed temp-file cleanup
   routers/
     analyze.py         The three upload endpoints + polling
     report.py          Evidence report endpoint
@@ -96,6 +100,21 @@ asserts this at the wire — if you add a field, keep it out of `AnalysisResult`
 **Uploads are deleted the moment analysis finishes.** `uploads.staged_upload` is
 a context manager that unlinks the temp file on every exit path. Don't copy the
 path anywhere that outlives it.
+
+**Resource limits sit above the parser, not below it.** `bodylimit.py` runs as
+ASGI middleware because that is the only layer that sees `receive` before FastAPI
+parses the multipart body — and parsing is what writes the body to disk. A cap
+checked inside the endpoint is checked after the damage. If you add an endpoint
+that accepts a body, add it to `_UPLOAD_PATHS` or it gets the 64KB default.
+Likewise, decoded size is a separate limit from encoded size: a 140KB PNG can
+decode to 144 megapixels, so `settings.max_image_pixels` is checked before
+`load()`. See `docs/DECISIONS.md` D17.
+
+**Middleware order is load-bearing and reads backwards.** `add_middleware`
+inserts at the front, so the last registered is the outermost. CORS must stay
+last, or a browser client that trips the rate limiter or the body ceiling sees an
+opaque CORS failure instead of the message explaining what happened. Two tests
+guard this.
 
 ## Known gaps at step 3
 

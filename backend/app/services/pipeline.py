@@ -18,15 +18,12 @@ from pathlib import Path
 
 from ..config import settings
 from ..schemas import (
-    AnalysisJob,
     AnalysisResult,
-    AnalysisStatus,
     ConfidenceBand,
     InternalScores,
     MediaKind,
     Verdict,
 )
-from ..storage import store
 from .disclaimer import RESULT_DISCLAIMER
 from .models import AudioModel, ImageModel, RawFramesModel, VideoAuthenticator
 from .models.artifacts import Thresholds
@@ -112,18 +109,25 @@ def _band_confidence(
     return ConfidenceBand.LOW
 
 
-def _has_audio_track(path: Path) -> bool:
-    """Whether the video carries a usable audio track.
+def run_analysis(
+    media_kind: MediaKind,
+    path: Path,
+    has_audio: bool | None = None,
+) -> tuple[AnalysisResult, InternalScores]:
+    """Run the appropriate models for this media type and band the result.
 
-    TODO(step 5): probe the container with ffprobe. Until then assume audio is
-    present; the authenticator already renormalises its weights when a signal is
-    missing, so the plumbing for the False case is in place and exercised.
+    ``has_audio`` comes from the container probe already performed during upload
+    validation (``uploads.StagedUpload``). It used to be a local helper that
+    returned a hardcoded ``True`` with a TODO to "probe the container with
+    ffprobe" — while PyAV was already probing every video upload two frames up
+    the stack and reporting exactly this. The consequence was that a silent video
+    had a hash-derived audio stub folded into fusion at weight 0.20 instead of
+    being renormalised away, and the False branch the authenticator implements
+    was never reachable.
+
+    ``None`` means unknown, which is treated as present: that is the old
+    behaviour, and it only applies to callers that do not have a probe result.
     """
-    return True
-
-
-def run_analysis(media_kind: MediaKind, path: Path) -> tuple[AnalysisResult, InternalScores]:
-    """Run the appropriate models for this media type and band the result."""
     analysed_at = datetime.now(timezone.utc)
 
     image_out: DetectorOutput | None = None
@@ -146,7 +150,7 @@ def run_analysis(media_kind: MediaKind, path: Path) -> tuple[AnalysisResult, Int
         # extraction, which arrives in step 5.
         image_out = image_model.analyze_video_frames(path)
         frames_out = raw_frames_model.analyze(path)
-        if _has_audio_track(path):
+        if has_audio is not False:
             audio_out = audio_model.analyze(path)
         final = video_authenticator.fuse(image_out, audio_out, frames_out)
         signals = [
@@ -191,48 +195,18 @@ def run_analysis(media_kind: MediaKind, path: Path) -> tuple[AnalysisResult, Int
     return result, internal
 
 
-def execute_job(analysis_id: str, media_kind: MediaKind, path: Path) -> None:
-    """Background entry point.
-
-    Runs inside a FastAPI BackgroundTask for now. NOTE: this must move to a real
-    worker queue (arq/Celery/RQ) before real model inference lands in step 3 —
-    GPU inference inside the web process will block the event loop and cannot be
-    scaled or retried independently.
-    """
-    job = store.get(analysis_id)
-    if job is None:
-        return
-
-    job.status = AnalysisStatus.RUNNING
-    store.update(job)
-
-    try:
-        result, internal = run_analysis(media_kind, path)
-        result.analysis_id = analysis_id
-        job.result = result
-        job.internal = internal
-        job.status = AnalysisStatus.COMPLETE
-    except Exception as exc:  # noqa: BLE001 - surface a safe message, log the rest
-        job.status = AnalysisStatus.FAILED
-        # Deliberately generic: internal exception text can leak paths and model
-        # details. The full traceback belongs in server logs, not the response.
-        job.error = "Analysis failed while processing this file."
-        _log_failure(analysis_id, exc)
-
-    store.update(job)
-
-
-def _log_failure(analysis_id: str, exc: Exception) -> None:
-    import logging
-
-    logging.getLogger(__name__).exception("analysis %s failed: %s", analysis_id, exc)
-
-
-def peek_internal(job: AnalysisJob) -> InternalScores | None:
-    """Internal scores, gated behind the disclosure setting.
-
-    Returns None in any configuration intended for public deployment.
-    """
-    if not settings.expose_internal_scores:
-        return None
-    return job.internal
+# NOTE (step 6): analysis still runs inline inside the request handler, which is
+# what D1 warned about. `execute_job` used to sit here as a background entry
+# point for a queue that was never wired up — nothing called it, so it was a
+# plausible-looking piece of infrastructure that would have gone stale silently.
+# Deleted rather than left to rot. The move to a real worker (arq/Celery/RQ) is
+# tracked as its own piece of work; the response contract (202 + poll) is already
+# the one a queue needs, so nothing above this changes when it lands.
+#
+# `peek_internal` was removed for the same reason. It gated InternalScores behind
+# `settings.expose_internal_scores`, and no route ever called it — which means the
+# setting was documented in D3 as the enforcement mechanism for the two-tier
+# disclosure rule while enforcing nothing. The actual enforcement is structural
+# and stronger: `AnalysisStatusResponse` has no field capable of carrying these
+# scores, so there is no code path that could serialise them and no flag anyone
+# can flip in production to start leaking them.

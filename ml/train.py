@@ -23,7 +23,9 @@ from sklearn.metrics import accuracy_score, roc_auc_score, roc_curve
 
 from .config import (
     ARTIFACT_DIR,
+    C_GRID,
     CLIP_MODEL_ID,
+    CLIP_REVISION,
     DATASET_ID,
     DATASET_LICENCE,
     FEATURE_DIM,
@@ -47,24 +49,78 @@ def load_split(split: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return data["embeddings"], data["labels"], data["generators"]
 
 
-def derive_thresholds(scores: np.ndarray, labels: np.ndarray) -> dict[str, float]:
-    """Turn a validation ROC into the three verdict-band boundaries.
+def held_out_fake_scores(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    g_train: np.ndarray,
+    x_val: np.ndarray,
+    y_val: np.ndarray,
+    g_val: np.ndarray,
+    best_c: float,
+) -> np.ndarray:
+    """Fake scores as produced by probes that never saw the generator in question.
 
-    docs/DECISIONS.md D4 requires these come from the ROC rather than being
+    Leave-one-generator-out: for each generator, refit with its images removed and
+    score only its fakes. Pooling those gives the score distribution of fakes from
+    an *unseen* generator, which is the distribution that matters — every image a
+    user uploads comes from a generator newer than this training data.
+
+    Cheap, because the CLIP features are cached: seven logistic regressions over
+    pre-computed vectors, not seven training runs.
+    """
+    pooled: list[np.ndarray] = []
+    for index in range(1, len(GENERATOR_NAMES)):
+        if not (g_train == index).any():
+            continue
+        probe = LogisticRegression(C=best_c, max_iter=3000, random_state=SEED)
+        probe.fit(x_train[g_train != index], y_train[g_train != index])
+
+        unseen = (g_val == index) & (y_val == 1)
+        if not unseen.any():
+            continue
+        pooled.append(probe.predict_proba(x_val[unseen])[:, 1])
+
+    if not pooled:
+        raise SystemExit("No generator could be held out; cannot calibrate honestly.")
+    return np.concatenate(pooled)
+
+
+def derive_thresholds(
+    scores: np.ndarray,
+    labels: np.ndarray,
+    unseen_fake_scores: np.ndarray,
+) -> dict[str, float]:
+    """Turn validation scores into the three verdict-band boundaries.
+
+    docs/DECISIONS.md D4 requires these come from the data rather than being
     picked by eye, and the two outer bands are the ones that can actually harm
     someone, so each is pinned to an explicit error rate:
 
-      t_authentic     at most ~5% of *fakes* score below it, so calling
-                      something "likely authentic" rarely misses a real fake.
+      t_authentic     at most ~5% of fakes score below it, so calling something
+                      "likely authentic" rarely misses a real fake.
       t_manipulated   at most ~5% of *real* images score above it, so a genuine
                       photo of a real person is rarely branded manipulated.
       t_possible      the equal-error point, splitting the middle into
                       "uncertain" and "possibly manipulated".
 
+    **t_authentic is measured against held-out generators, not the validation
+    split.** This is a correction, and it matters. The 5% promise was previously
+    computed from the fake scores of the same eight generators the probe trained
+    on, which makes it a claim about images the model has effectively already
+    seen. Against a generator excluded from training, the measured miss rate at
+    0.5 reached 63% (VQDM, see the generalisation report) — so the in-distribution
+    quantile understated the real false-negative rate by more than an order of
+    magnitude, on the one band whose entire job is to tell someone "no signs of
+    manipulation".
+
+    Since every real upload is from a generator newer than the training set, the
+    held-out distribution is the only one that describes the deployed model. It
+    pushes t_authentic down, which is the correct direction: fewer files are
+    called authentic, and the ones that are have earned it.
+
     Clamping to the EER point keeps the three ordered even when the model
     separates the classes so cleanly that the two quantiles cross over.
     """
-    fake_scores = scores[labels == 1]
     real_scores = scores[labels == 0]
 
     fpr, tpr, cuts = roc_curve(labels, scores)
@@ -72,14 +128,24 @@ def derive_thresholds(scores: np.ndarray, labels: np.ndarray) -> dict[str, float
     eer_threshold = float(cuts[eer_index])
     eer = float((fpr[eer_index] + (1 - tpr[eer_index])) / 2)
 
-    t_authentic = min(float(np.quantile(fake_scores, 0.05)), eer_threshold)
+    t_authentic = min(float(np.quantile(unseen_fake_scores, 0.05)), eer_threshold)
     t_manipulated = max(float(np.quantile(real_scores, 0.95)), eer_threshold)
+
+    # What the in-distribution quantile would have produced, kept for comparison
+    # so the size of the correction is visible in the artifact rather than only in
+    # this docstring.
+    in_distribution = float(np.quantile(scores[labels == 1], 0.05))
 
     return {
         "authentic_below": round(t_authentic, 6),
         "possible_above": round(eer_threshold, 6),
         "manipulated_above": round(t_manipulated, 6),
         "equal_error_rate": round(eer, 6),
+        "authentic_below_calibrated_on": "held_out_generators",
+        "authentic_below_if_in_distribution": round(in_distribution, 6),
+        "unseen_fake_miss_rate_at_authentic_below": round(
+            float((unseen_fake_scores < t_authentic).mean()), 6
+        ),
     }
 
 
@@ -141,11 +207,11 @@ def main() -> None:
     # frozen features depends on how separable this particular feature space is,
     # and that is not knowable in advance. Selected on validation AUC.
     best = None
-    for c in [0.01, 0.1, 1.0, 10.0, 100.0]:
+    for c in C_GRID:
         probe = LogisticRegression(C=c, max_iter=3000, random_state=SEED)
         probe.fit(x_train, y_train)
         auc = roc_auc_score(y_val, probe.predict_proba(x_val)[:, 1])
-        print(f"[train] C={c:<6} val AUC={auc:.4f}")
+        print(f"[train] C={c:<8} val AUC={auc:.4f}")
         if best is None or auc > best[0]:
             best = (auc, c, probe)
 
@@ -153,8 +219,23 @@ def main() -> None:
     val_auc, best_c, probe = best
     print(f"[train] selected C={best_c} (val AUC={val_auc:.4f})")
 
+    # An optimum on the edge of the grid means the grid chose the value, not the
+    # data, and the true optimum may lie outside it. Worth saying out loud rather
+    # than leaving in the log for someone to notice.
+    if best_c in (C_GRID[0], C_GRID[-1]):
+        print(
+            f"[train] WARNING: selected C={best_c} is at the edge of the sweep "
+            f"({C_GRID[0]}..{C_GRID[-1]}). Extend C_GRID in ml/config.py — the "
+            "grid is bounding the choice, and at the top end that means the least "
+            "regularised probe, which is the one most able to memorise a "
+            "generator's fingerprint."
+        )
+
     val_scores = probe.predict_proba(x_val)[:, 1]
-    thresholds = derive_thresholds(val_scores, y_val)
+
+    print("[train] calibrating the authentic band against held-out generators...")
+    unseen_fakes = held_out_fake_scores(x_train, y_train, g_train, x_val, y_val, g_val, best_c)
+    thresholds = derive_thresholds(val_scores, y_val, unseen_fakes)
     accuracy = accuracy_score(y_val, (val_scores >= 0.5).astype(int))
 
     metrics = {
@@ -178,6 +259,7 @@ def main() -> None:
         ),
         "backbone": {
             "model_id": CLIP_MODEL_ID,
+            "revision": CLIP_REVISION,
             "frozen": True,
             "feature_dim": FEATURE_DIM,
             "preprocessing": "CLIPImageProcessor defaults, then L2 normalisation",

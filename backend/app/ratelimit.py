@@ -92,20 +92,47 @@ class SlidingWindowLimiter:
             hits.append(now)
             return None
 
+    #: Fraction of tracked clients discarded when every entry is still live and
+    #: there is nothing stale to reclaim. Small on purpose — see _evict.
+    EVICTION_FRACTION = 0.1
+
     def _evict(self, now: float) -> None:
-        """Drop entries with no live hits. Caller holds the lock."""
+        """Reclaim space in the client table. Caller holds the lock.
+
+        Stale entries first: anything with no hits inside the last hour is free
+        to drop, since its allowance has fully recovered anyway and re-creating
+        it costs nothing.
+
+        If nothing is stale — a genuine flood from many distinct sources — this
+        used to call ``self._hits.clear()``. That was worse than the unbounded
+        growth it was avoiding: wiping the table resets *every* client's
+        allowance, including the allowance of whoever triggered the wipe, which
+        turns the memory bound into an attacker-triggerable reset of the control
+        itself. Anyone able to present enough distinct sources could clear their
+        own limit on demand.
+
+        So the fallback drops the least-recently-active tenth instead. That keeps
+        the table bounded, keeps the limits of every currently-active client
+        intact, and cannot be used to clear a specific client's counter: an
+        attacker mid-flood is by definition among the most recently active, so
+        their own entries are the last to go.
+        """
         stale = [key for key, hits in self._hits.items() if not hits or hits[-1] <= now - 3600]
         for key in stale:
             del self._hits[key]
-        if not stale:
-            # Everything is live: a real flood from many distinct IPs. Dropping
-            # the oldest is wrong (it frees exactly the attacker's entries) but
-            # unbounded growth is worse. Log it — this is worth alerting on.
-            logger.warning(
-                "Rate limiter tracking %d live clients; possible distributed flood",
-                len(self._hits),
-            )
-            self._hits.clear()
+        if stale:
+            return
+
+        logger.warning(
+            "Rate limiter tracking %d live clients with nothing stale to reclaim; "
+            "possible distributed flood. Evicting the least-recently-active %.0f%%.",
+            len(self._hits),
+            self.EVICTION_FRACTION * 100,
+        )
+        drop_count = max(int(len(self._hits) * self.EVICTION_FRACTION), 1)
+        by_last_seen = sorted(self._hits.items(), key=lambda kv: kv[1][-1] if kv[1] else 0.0)
+        for key, _ in by_last_seen[:drop_count]:
+            del self._hits[key]
 
     def reset(self) -> None:
         """Test hook."""

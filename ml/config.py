@@ -32,6 +32,13 @@ ARTIFACT_DIR = REPO_ROOT / "models"
 CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
 FEATURE_DIM = 512
 
+# Pinned to an immutable commit, and it must match
+# backend/app/services/models/artifacts.py:CLIP_REVISION. A probe's coefficients
+# are only meaningful against the exact feature space they were fitted on, and a
+# backbone that changed underneath them fails silently: the dot product still
+# returns a number in [0,1] and the API still returns a verdict.
+CLIP_REVISION = "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
+
 # --- Dataset ----------------------------------------------------------------
 # Tiny-GenImage: a 35k-image subset of GenImage. Open access, no gating.
 #
@@ -55,6 +62,16 @@ GENERATOR_NAMES = [
     "VQDM",
     "Wukong",
 ]
+
+#: Inverse-regularisation sweep for the probe. Selected on validation AUC.
+#:
+#: The grid was previously [0.01 … 100.0] and selection landed on 100.0 — the top
+#: of the range. An optimum at an endpoint means the grid, not the model, chose the
+#: value, and here it chose the least-regularised end: exactly the setting most
+#: able to fit each training generator's fingerprint, which is the failure D10
+#: exists to avoid. Extended so the curve can turn over inside the range;
+#: `train.py` warns if selection still lands on a boundary.
+C_GRID = [0.01, 0.1, 1.0, 10.0, 100.0, 300.0, 1000.0, 3000.0]
 
 SEED = 20260729
 

@@ -26,8 +26,13 @@ from .base import DetectorOutput, stable_pseudo_score
 #: The one finding a stub is entitled to make: that it isn't a model yet.
 #: Not an empty list, because the API contract requires every result to carry at
 #: least one finding and an audio-only upload has nothing else to show.
+#:
+#: The code names the model, rather than being a shared "model_not_implemented".
+#: A video result collects findings from both this stub and the raw-frames one,
+#: and `code` is the identity of a finding — the dashboard keys its list on it, so
+#: a shared value made two distinct findings collide on every video upload.
 NOT_IMPLEMENTED_NOTE = EvidenceItem(
-    code="model_not_implemented",
+    code="audio_model_not_implemented",
     summary=(
         "Audio analysis isn't available yet. This result is a placeholder and "
         "says nothing about the recording you uploaded."

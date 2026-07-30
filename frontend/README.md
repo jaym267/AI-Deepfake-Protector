@@ -84,8 +84,10 @@ would quietly undercut that.
 
 **The mock banner is not decorative.** While `is_mock` is true the result is a
 placeholder derived from a hash of the file's bytes. It has to be impossible to
-mistake for a real finding about a real person's file. It disappears on its own
-when `MODELS_ARE_STUBS` is set false in step 6.
+mistake for a real finding about a real person's file. It clears itself per media
+kind as each model becomes real — `is_mock` is true if *any* contributing detector
+was a stub (D13) — so image results already show no banner while audio and video
+still do. There is no global flag to remember to flip.
 
 ### No local mocks
 
@@ -99,12 +101,16 @@ backend or it shows an error.
 - **Cancellation is client-side only.** Navigating away or hitting the poll
   timeout stops the UI; it doesn't stop server work. Worth a `DELETE /analyze/{id}`
   once inference actually costs GPU time (step 3).
-- **Duration limits aren't checked here.** Byte caps are, from `GET /limits`.
-  Duration (audio 2min / video 60s) isn't enforced on either side yet —
-  D5 item 4, deferred to steps 3–5.
-- **No evidence overlay.** Findings carry timestamps and coarse regions
-  ("around the jaw and hairline") but there's no player scrubbing to them or
-  heatmap over the image. That needs real localisation data from real models.
+- **Duration limits aren't checked here**, only advertised. Byte caps are checked
+  client-side from `GET /limits`; duration (audio 2min / video 60s) is enforced
+  server-side with PyAV (D16), so an over-long file is rejected after upload
+  rather than before it.
+- **No evidence overlay.** `EvidenceItem` has `start_seconds`/`end_seconds`/
+  `region` fields, but nothing populates them yet: the image probe is a
+  whole-image classifier with no spatial localisation, and the stubs are
+  forbidden from inventing localisation they cannot measure (D14). A player that
+  scrubs to a timestamp, or a heatmap, needs a model that actually produces one —
+  the audio model in step 4 is the first that will.
 - **Not internationalised.** All copy is English, in `src/copy.ts`.
 - **No frontend tests.** Backend has pytest coverage; this step was verified
   manually against the running backend (upload → poll → result, unsupported
